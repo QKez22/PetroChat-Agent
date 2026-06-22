@@ -1,43 +1,39 @@
-"""FastAPI 应用入口。
-
-步骤 1.2 后：集成 core 配置，启动时输出加载到的关键配置摘要。
-"""
+"""FastAPI 应用入口。"""
 
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from petrochat.app.api import router as api_router
 from petrochat.app.core import get_settings
 
 
 def create_app() -> FastAPI:
-    """应用工厂函数。"""
     settings = get_settings()
-
     app = FastAPI(
         title="PetroChat-Agent",
         description="石化领域智能问答与质检 Agent 平台",
         version="0.1.0",
     )
-
-    # 启动时打印配置摘要（不含敏感字段）
-    logger.info(
-        "App starting: env={} host={}:{} chroma={} embedding_model={} chat_model={}",
-        settings.app_env,
-        settings.app_host,
-        settings.app_port,
-        settings.chroma_url,
-        settings.embedding_model,
-        settings.deepseek_chat_model,
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
+    logger.info("App starting: env={} chroma={} chat_model={}",
+                settings.app_env, settings.chroma_url, settings.deepseek_chat_model)
+    app.include_router(api_router)
 
-    @app.get("/health", summary="健康检查")
-    async def health() -> dict[str, str]:
+    @app.get("/health")
+    async def health():
         return {"status": "ok"}
 
-    @app.get("/", summary="根路由")
-    async def root() -> dict[str, str]:
+    @app.get("/")
+    async def root():
         return {
             "name": "PetroChat-Agent",
             "version": "0.1.0",
@@ -45,12 +41,8 @@ def create_app() -> FastAPI:
             "docs": "/docs",
         }
 
-    @app.get("/config", summary="当前配置摘要（不含敏感字段）")
-    async def config_summary() -> dict[str, object]:
-        """暴露非敏感配置，方便确认环境变量是否正确加载。
-
-        SecretStr 字段只返回是否非空，不返回明文。
-        """
+    @app.get("/config")
+    async def config_summary():
         s = get_settings()
         return {
             "app_env": s.app_env,

@@ -1,4 +1,5 @@
-"""API 层：FastAPI 路由、SSE 流式推送、请求校验。
+"""API 层：FastAPI 路由、SSE 流式推送、请求校验。"""
 
-依赖：agent, core
-"""
+from .routes import router
+
+__all__ = ["router"]
