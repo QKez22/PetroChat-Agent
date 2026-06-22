@@ -1,0 +1,27 @@
+# ============================================================
+# PetroChat-Agent 依赖服务编排
+# 启动:  docker compose up -d
+# 关闭:  docker compose down
+# 查看日志: docker compose logs -f chroma
+# ============================================================
+
+services:
+  # ---------- Chroma 向量库 ----------
+  # 第一阶段：纯 HTTP 模式跑 Chroma，Python 端用 chromadb-client 连接
+  # 数据持久化到本地 ./chroma_db 目录（已加入 .gitignore）
+  chroma:
+    image: chromadb/chroma:0.5.23
+    container_name: petrochat-chroma
+    restart: unless-stopped
+    ports:
+      - "8001:8000"  # 宿主机 8001 → 容器 8000，避免与 FastAPI 的 8000 冲突
+    volumes:
+      - ./chroma_db:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
