@@ -7,11 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from petrochat.app.api import router as api_router
-from petrochat.app.core import get_settings
+from petrochat.app.core import get_settings, setup_langsmith
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    setup_langsmith()
+
     app = FastAPI(
         title="PetroChat-Agent",
         description="石化领域智能问答与质检 Agent 平台",

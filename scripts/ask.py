@@ -16,6 +16,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from petrochat.app.agent import build_graph  # noqa: E402
+from petrochat.app.core import setup_langsmith  # noqa: E402
+
+# CLI 调用也启用 LangSmith 追踪（如果 .env 配了的话）
+setup_langsmith()
 
 
 def main() -> int:
