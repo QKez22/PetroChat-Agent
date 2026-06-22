@@ -1,12 +1,7 @@
 """LLM / Embedding 客户端工厂。
 
-设计要点：
-1. 按 "用途" 暴露工厂函数（get_chat_llm / get_reasoner_llm / get_embedding），
-   调用方不需要关心底层是 DeepSeek 还是阿里云，便于后续替换模型。
-2. DeepSeek 和阿里云百炼都通过 OpenAI 兼容协议调用，复用 langchain-openai 一个客户端，
-   依赖更少，模型切换只是改 base_url + api_key + model。
-3. 客户端实例化用 @lru_cache 缓存，避免每次请求都新建 HTTP 连接池。
-4. temperature 等推理参数在工厂函数处提供合理默认值，调用方可覆盖。
+按用途暴露 get_chat_llm / get_reasoner_llm / get_embedding，调用方不关心底层。
+DeepSeek 和阿里云百炼均通过 OpenAI 兼容协议调用，共用 langchain-openai。
 """
 
 from __future__ import annotations
@@ -20,12 +15,7 @@ from .config import get_settings
 
 @lru_cache(maxsize=1)
 def get_chat_llm() -> ChatOpenAI:
-    """获取 DeepSeek chat 客户端（用于 RAG 问答生成）。
-
-    temperature=0.3 兼顾稳定性与表达自然度：
-      - 太低 (0.0) 会让答案僵硬、复述检索片段；
-      - 太高 (0.7+) 会让答案飘忽、引用对不上召回内容。
-    """
+    """DeepSeek chat（用于 RAG 答案生成）。"""
     s = get_settings()
     return ChatOpenAI(
         model=s.deepseek_chat_model,
@@ -39,27 +29,29 @@ def get_chat_llm() -> ChatOpenAI:
 
 @lru_cache(maxsize=1)
 def get_reasoner_llm() -> ChatOpenAI:
-    """获取 DeepSeek reasoner 客户端（用于后续质检评分的 LLM-as-Judge）。
-
-    第一阶段不会用到，但提前定义好，第四阶段可以无缝切换。
-    reasoner 模型不支持 temperature 参数（官方要求），传 None 让 langchain 跳过。
-    """
+    """DeepSeek reasoner（后续第四阶段做评分 Judge）。"""
     s = get_settings()
     return ChatOpenAI(
         model=s.deepseek_reasoner_model,
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,
-        timeout=120,  # 推理模型耗时更长
+        timeout=120,
         max_retries=2,
     )
 
 
 @lru_cache(maxsize=1)
 def get_embedding() -> OpenAIEmbeddings:
-    """获取阿里云百炼 Embedding 客户端（text-embedding-v3）。
+    """阿里云百炼 text-embedding-v3。
 
-    用 OpenAI 兼容协议直接调用，无需引入 dashscope SDK。
-    dimensions=1024 是性能与成本的最佳平衡点（百炼官方推荐）。
+    关键参数：
+      check_embedding_ctx_length=False
+        LangChain 默认会用 tiktoken 把字符串本地切成 token ID 再发，
+        OpenAI 官方接口接受 token ID，但**百炼兼容层只认纯字符串**，
+        不关掉会报 400 'input.contents is neither str nor list of str'。
+        国内厂商走 OpenAI 兼容协议的通用坑。
+      chunk_size=embedding_batch_size
+        百炼实测批量上限 10（超过会报 400），用配置项暴露便于切厂商。
     """
     s = get_settings()
     return OpenAIEmbeddings(
@@ -67,6 +59,6 @@ def get_embedding() -> OpenAIEmbeddings:
         api_key=s.dashscope_api_key,
         base_url=s.dashscope_base_url,
         dimensions=s.embedding_dim,
-        # 阿里云百炼批量调用上限，超过会报错；保守取 10
-        chunk_size=10,
+        chunk_size=s.embedding_batch_size,
+        check_embedding_ctx_length=False,
     )

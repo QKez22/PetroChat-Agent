@@ -15,70 +15,55 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录（用于定位 .env、chroma_db 等）
-# core/config.py → app/core/config.py → 向上四层到项目根
+# 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 class Settings(BaseSettings):
-    """应用全局配置。
-
-    所有字段会自动从环境变量或 .env 文件加载，对应关系按字段名（不区分大小写）。
-    """
-
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",  # 允许 .env 中存在未声明的字段（如 conda 的变量），但不会读入
+        extra="ignore",
     )
 
-    # ---------- 应用 ----------
-    app_env: str = Field(default="dev", description="运行环境：dev / prod")
+    # 应用
+    app_env: str = Field(default="dev")
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
 
-    # ---------- DeepSeek（Chat / Reasoner）----------
+    # DeepSeek
     deepseek_api_key: SecretStr = Field(default=SecretStr(""))
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1")
     deepseek_chat_model: str = Field(default="deepseek-chat")
     deepseek_reasoner_model: str = Field(default="deepseek-reasoner")
 
-    # ---------- 阿里云百炼（Embedding）----------
+    # 阿里云百炼 Embedding
     dashscope_api_key: SecretStr = Field(default=SecretStr(""))
-    dashscope_base_url: str = Field(
-        default="https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
+    dashscope_base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1")
     embedding_model: str = Field(default="text-embedding-v3")
     embedding_dim: int = Field(default=1024)
+    # 阿里云百炼实测上限 10；切到 OpenAI 官方时可调到 100+
+    embedding_batch_size: int = Field(default=10)
 
-    # ---------- Chroma 向量库 ----------
+    # Chroma
     chroma_host: str = Field(default="localhost")
     chroma_port: int = Field(default=8001)
     chroma_collection: str = Field(default="petrochat_specs")
 
-    # ---------- LangSmith ----------
+    # LangSmith
     langsmith_tracing: bool = Field(default=False)
     langsmith_api_key: SecretStr = Field(default=SecretStr(""))
     langsmith_project: str = Field(default="petrochat-agent")
     langsmith_endpoint: str = Field(default="https://api.smith.langchain.com")
 
-    # ------------------------------------------------------------------
-    # 派生属性（不从环境变量读，从其它字段计算）
-    # ------------------------------------------------------------------
     @property
     def chroma_url(self) -> str:
-        """Chroma 服务的完整 HTTP URL。"""
         return f"http://{self.chroma_host}:{self.chroma_port}"
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """获取全局配置单例。
-
-    用 lru_cache 实现单例：第一次调用时创建并缓存，后续调用直接返回缓存对象。
-    这是 pydantic-settings 官方推荐的模式，比模块级单例对测试更友好
-    （测试中可以用 get_settings.cache_clear() 强制重新加载）。
-    """
+    """获取全局配置单例。"""
     return Settings()

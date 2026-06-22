@@ -1,9 +1,12 @@
-"""RAG 层：文档解析、Embedding、向量库 CRUD、检索。
-
-依赖：core
-"""
+"""RAG 层：文档解析、Embedding、向量库 CRUD、检索器。"""
 
 from .parser import parse_docx
+from .retriever import (
+    PetrochatRetriever,
+    format_citation,
+    format_citations,
+    make_retriever,
+)
 from .vector_store import (
     count,
     delete_by_filter,
@@ -15,9 +18,7 @@ from .vector_store import (
 )
 
 __all__ = [
-    # 解析
     "parse_docx",
-    # 向量库操作
     "get_client",
     "get_or_create_collection",
     "upsert_chunks",
@@ -25,4 +26,8 @@ __all__ = [
     "delete_by_filter",
     "count",
     "reset_collection",
+    "PetrochatRetriever",
+    "make_retriever",
+    "format_citation",
+    "format_citations",
 ]
