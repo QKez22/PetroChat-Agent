@@ -102,14 +102,34 @@ uv run uvicorn petrochat.main:app --reload --host 0.0.0.0 --port 8000
 ## 当前进度
 
 - [x] **步骤 1.1** 工程脚手架（uv + src-layout + 7 个能力包骨架）
-- [ ] 步骤 1.2 `core` 包：配置、LLM 客户端、AgentState
-- [ ] 步骤 1.3 规范文档解析器（python-docx 层级切片）
-- [ ] 步骤 1.4 Chroma 向量库增删改查
-- [ ] 步骤 1.5 入库脚本
+- [x] **步骤 1.2** `core` 包：配置、LLM 客户端、AgentState
+- [x] **步骤 1.3** 规范文档解析器（python-docx 层级切片）
+- [x] **步骤 1.4** Chroma 向量库增删改查
+- [x] **步骤 1.5** 入库脚本
 - [ ] 步骤 1.6 检索器（向量召回 + 元数据过滤）
 - [ ] 步骤 1.7 LangGraph 单节点 RAG
 - [ ] 步骤 1.8 FastAPI + SSE 流式接口
 - [ ] 步骤 1.9 LangSmith 接入
+
+## 入库工作流
+
+```bash
+# 1. 启动 Chroma
+docker compose up -d chroma
+
+# 2. 把规范文档放到 data/raw/
+# 3. 如有 .doc 旧格式，先转换
+uv run python scripts/convert_doc.py data/raw/
+
+# 4. 全量入库
+uv run python scripts/ingest.py
+
+# 5. 仅看会切多少 chunk（不入库，秒级）
+uv run python scripts/ingest.py --dry-run
+
+# 6. 改了切片逻辑，清空集合重建
+uv run python scripts/ingest.py --reset
+```
 
 ## License
 

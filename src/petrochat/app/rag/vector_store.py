@@ -13,9 +13,15 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
-import chromadb
+# 关掉 chromadb 客户端的匿名遥测（避免日志里出现 posthog 失败警告）
+# 必须在 import chromadb 之前设置才能生效
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "none")
+
+import chromadb  # noqa: E402
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
 from loguru import logger
