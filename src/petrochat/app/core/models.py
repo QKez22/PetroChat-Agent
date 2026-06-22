@@ -1,0 +1,83 @@
+"""Pydantic 实体模型。
+
+跟 state.py 的 TypedDict 互补：
+  - TypedDict 用于 LangGraph 内部高频读写、节点间传递
+  - Pydantic 用于 API 边界、LLM 结构化输出、持久化对象
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class KnowledgeChunk(BaseModel):
+    """向量库中的一条知识片段。
+
+    入库前组装、检索后还原都用这个模型，保证字段命名贯穿整个 RAG pipeline。
+    """
+
+    chunk_id: str = Field(description="唯一标识，由 source_doc + section_number 派生")
+    content: str = Field(description="片段正文")
+    source_doc: str = Field(description="所属规范文件名（不含扩展名）")
+    section_number: str = Field(default="", description="章节编号，如 4.2.2")
+    section_path: str = Field(default="", description="章节路径，如 '4 职责 > 4.2 设备主管部门'")
+    doc_code: str = Field(default="", description="文档代号，如 SINOPEC-R&C-01-01")
+    chunk_type: Literal["clause", "table", "definition", "other"] = Field(
+        default="clause", description="片段类型，便于检索时过滤"
+    )
+    created_at: datetime = Field(default_factory=datetime.now)
+
+    def to_metadata(self) -> dict[str, str]:
+        """转成 Chroma metadata 字典（Chroma 要求 metadata 值是 str/int/float/bool）。"""
+        return {
+            "source_doc": self.source_doc,
+            "section_number": self.section_number,
+            "section_path": self.section_path,
+            "doc_code": self.doc_code,
+            "chunk_type": self.chunk_type,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+class RetrievedChunk(BaseModel):
+    """检索后的单条结果，包含相似度得分。"""
+
+    chunk_id: str
+    content: str
+    metadata: dict[str, str | int | float | bool]
+    score: float = Field(description="相似度得分，越接近 0（cosine distance）越相关")
+
+
+class ScoreResult(BaseModel):
+    """三维质检评分结果（第四阶段使用，第一阶段先定义类型）。"""
+
+    correctness: int = Field(ge=1, le=5, description="正确性 1-5")
+    completeness: int = Field(ge=1, le=5, description="完整性 1-5")
+    usefulness: int = Field(ge=1, le=5, description="有用性 1-5")
+    reason: str = Field(description="评分理由")
+
+    @property
+    def average(self) -> float:
+        """三维平均分，可用于判断是否触发重试。"""
+        return (self.correctness + self.completeness + self.usefulness) / 3
+
+
+# ---------- API 边界模型 ----------
+
+
+class ChatRequest(BaseModel):
+    """前端 → 后端的对话请求。"""
+
+    question: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = Field(default=None, description="多轮会话 ID（暂未使用）")
+
+
+class ChatResponse(BaseModel):
+    """非流式接口的响应（流式接口用 SSE，不走这个）。"""
+
+    answer: str
+    citations: list[str] = Field(default_factory=list)
+    score: ScoreResult | None = None
