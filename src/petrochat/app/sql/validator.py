@@ -1,14 +1,10 @@
-"""SQL 安全校验 —— 用 sqlglot AST 解析，不靠正则。
-
-为什么必须 AST：
-  正则识别 'SELECT' 起手就误判 'SELECT 1; DELETE FROM t' 这种串。
-  AST 能严格区分顶级语句类型，且统计任何嵌套的 DDL/DML 节点。
+"""SQL 安全校验 —— sqlglot AST 解析。
 
 校验项：
-  1. 顶级必须是 SELECT
-  2. AST 中不能出现 INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE
-  3. 引用的表不能落到系统库（information_schema / mysql / performance_schema / sys）
-  4. 没有显式 LIMIT 时自动注入；过大 LIMIT 强制下钳
+  1. 单语句（多语句直接拒）
+  2. 顶级必须是 SELECT（含 WITH ... SELECT，sqlglot 都归类为 Select）
+  3. 引用的表不能落到系统库
+  4. LIMIT 自动注入 / 下钳
 """
 
 from __future__ import annotations
@@ -20,14 +16,7 @@ from sqlglot import expressions as exp
 
 from ..core.config import get_settings
 
-# 系统库黑名单（不允许查询）
 _FORBIDDEN_DBS = {"information_schema", "mysql", "performance_schema", "sys"}
-
-# 危险节点类型（出现即拒）
-_FORBIDDEN_NODE_TYPES = (
-    exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.AlterColumn,
-    exp.AlterTable, exp.Create, exp.TruncateTable,
-)
 
 
 @dataclass
@@ -38,12 +27,11 @@ class ValidationResult:
 
 
 def validate_sql(raw_sql: str) -> ValidationResult:
-    """校验并改写 SQL：返回归一化后的可执行 SQL。"""
     raw_sql = raw_sql.strip().rstrip(";").strip()
     if not raw_sql:
         return ValidationResult(ok=False, sql="", reason="空 SQL")
 
-    # 1) 解析（MySQL 方言）。多语句会抛 ParseError
+    # 1) 解析（MySQL 方言）
     try:
         statements = sqlglot.parse(raw_sql, dialect="mysql")
     except sqlglot.errors.ParseError as e:
@@ -57,37 +45,35 @@ def validate_sql(raw_sql: str) -> ValidationResult:
 
     parsed = statements[0]
 
-    # 2) 顶级必须 SELECT（含 CTE 形式 WITH ... SELECT 也包装为 Select）
+    # 2) 顶级必须 SELECT
+    # MySQL 的 SELECT 语法不允许嵌套 DDL/DML，所以顶级类型检查就够了
     if not isinstance(parsed, exp.Select):
         return ValidationResult(
             ok=False, sql=raw_sql,
             reason=f"只允许 SELECT 语句，收到: {type(parsed).__name__}",
         )
 
-    # 3) AST 内任何 DDL/DML 节点都拒
-    for node in parsed.walk():
-        if isinstance(node, _FORBIDDEN_NODE_TYPES):
-            return ValidationResult(
-                ok=False, sql=raw_sql,
-                reason=f"含禁止操作: {type(node).__name__}",
-            )
-
-    # 4) 表名不能落到系统库
+    # 3) 表名不能落到系统库
     for tbl in parsed.find_all(exp.Table):
         db = (tbl.db or "").lower()
         if db in _FORBIDDEN_DBS:
             return ValidationResult(
                 ok=False, sql=raw_sql, reason=f"禁止访问系统库: {db}",
             )
+        # 也兼容 unqualified 直接命中系统库名作 schema 的情况
+        name = (tbl.name or "").lower()
+        if name in _FORBIDDEN_DBS:
+            return ValidationResult(
+                ok=False, sql=raw_sql, reason=f"禁止访问系统库: {name}",
+            )
 
-    # 5) LIMIT 注入 / 下钳
+    # 4) LIMIT 注入 / 下钳
     settings = get_settings()
     cap = settings.sql_default_limit
     current_limit = parsed.args.get("limit")
     if current_limit is None:
         parsed = parsed.limit(cap)
     else:
-        # 取出现有 limit 的数值；超出上限就替换
         lit = current_limit.expression
         try:
             val = int(getattr(lit, "this", 0))

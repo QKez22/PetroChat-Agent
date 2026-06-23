@@ -42,18 +42,23 @@ def _cached_schema_md() -> str:
 
 @lru_cache(maxsize=1)
 def _cached_examples() -> tuple[list[dict], list[str]]:
-    """(few-shot 样例, 业务知识铁则)。"""
+    """(few-shot 样例, 业务知识铁则)。
+
+    YAML 结构（顶层 dict）：
+      examples:
+        - question: ...
+          sql: |
+            ...
+      domain_knowledge:
+        - "..."
+    """
     if not EXAMPLES_FILE.exists():
         return [], []
     raw = yaml.safe_load(EXAMPLES_FILE.read_text(encoding="utf-8"))
-    examples: list[dict] = []
-    knowledge: list[str] = []
-    for item in raw or []:
-        if isinstance(item, dict):
-            if "question" in item and "sql" in item:
-                examples.append(item)
-            elif "_domain_knowledge" in item:
-                knowledge = item["_domain_knowledge"] or []
+    if not isinstance(raw, dict):
+        return [], []
+    examples = [e for e in (raw.get("examples") or []) if isinstance(e, dict)]
+    knowledge = list(raw.get("domain_knowledge") or [])
     return examples, knowledge
 
 
@@ -89,8 +94,16 @@ def _build_system_prompt() -> str:
 
 
 def generate_sql(question: str) -> SqlPlan:
-    """把自然语言问题转成 SqlPlan（sql + reasoning）。"""
-    llm = get_chat_llm().with_structured_output(SqlPlan)
+    """把自然语言问题转成 SqlPlan（sql + reasoning）。
+
+    关键参数 method="function_calling"：
+      DeepSeek（含国内多数厂商）的 OpenAI 兼容层**不支持** response_format=json_schema
+      （那是 OpenAI 最新私有特性），会返回
+      'This response_format type is unavailable now' 的 400 错误。
+      function_calling 走 tool_calls 机制，跟 phase 2 的 bind_tools 同源，
+      DeepSeek / 通义 / 智谱都支持。
+    """
+    llm = get_chat_llm().with_structured_output(SqlPlan, method="function_calling")
     sys_prompt = _build_system_prompt()
     logger.info("generate_sql 入参: {}", question[:80])
     plan: SqlPlan = llm.invoke([
@@ -105,3 +118,9 @@ def clear_caches() -> None:
     """测试 / dev 期使用：清空 schema 与样例缓存。"""
     _cached_schema_md.cache_clear()
     _cached_examples.cache_clear()
+
+
+def preview_schema_md() -> str:
+    """给 CLI / 调试用的 schema 预览（清缓存后重抓一次）。"""
+    clear_caches()
+    return _cached_schema_md()

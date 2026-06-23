@@ -1,7 +1,8 @@
-"""领域工具集合。"""
+"""领域工具集合（Phase 2 + 4）。"""
 
 from .lookup import lookup_section, search_within_doc
 from .retrieve import retrieve_specs
+from .sql_tool import query_database
 from .units import convert_unit
 
 ALL_TOOLS = [
@@ -9,6 +10,7 @@ ALL_TOOLS = [
     lookup_section,
     search_within_doc,
     retrieve_specs,
+    query_database,
 ]
 
 __all__ = [
@@ -16,5 +18,6 @@ __all__ = [
     "lookup_section",
     "search_within_doc",
     "retrieve_specs",
+    "query_database",
     "ALL_TOOLS",
 ]

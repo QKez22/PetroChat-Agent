@@ -1,50 +1,29 @@
-"""query_database 工具：让 ReAct agent 能直接查 MySQL 业务库。
+"""query_database 工具：让 ReAct agent 能查 MySQL 业务库 + 自动生成报表。
 
-为什么把 4 步压成一个 @tool：
-  ReAct agent 不需要管 SQL 生成 / 校验 / 执行的内部步骤；
-  它只关心"问问题 → 拿结果"。细粒度子图在 Step 4.5 用 Supervisor 模式重新拆开。
+Step 4.3 接入 report 模块：
+- DataFrame → Markdown 表 + base64 图表
+- 给 LLM 的字符串里不带 base64（省 token），只标注"已生成图表"
+- 图表通过 report.pop_last_report() 由 SSE 层取走作 meta 事件
 """
 
 from __future__ import annotations
 
+import pandas as pd
 from langchain_core.tools import tool
 
+from ..report import render_report
 from ..sql import nl2sql
-
-
-def _format_rows_markdown(columns: list[str], rows: list[dict], max_rows: int = 50) -> str:
-    """把 SQL 结果渲染成 Markdown 表（截断超长）。"""
-    if not rows:
-        return "_(0 行)_"
-    head = "| " + " | ".join(columns) + " |"
-    sep = "| " + " | ".join(["---"] * len(columns)) + " |"
-    body = []
-    for r in rows[:max_rows]:
-        cells = []
-        for c in columns:
-            v = r.get(c)
-            cells.append("" if v is None else str(v).replace("\n", " ").replace("|", "/"))
-        body.append("| " + " | ".join(cells) + " |")
-    if len(rows) > max_rows:
-        body.append(f"| _… 后续 {len(rows) - max_rows} 行省略_ |" + " |" * (len(columns) - 1))
-    return "\n".join([head, sep, *body])
 
 
 @tool
 def query_database(question: str) -> str:
     """查询事务任务管理 MySQL 数据库（affair 事务表 / affair_task 任务表）。
 
-    适用场景：用户问题涉及具体业务数据查询，如：
-      - 某专业 / 部门 / 设备的事务清单
-      - 任务执行进度 / 上传统计
-      - 即将到期的事务、需要开票的任务
-      - 各部门数量、类型分布等统计
-
     Args:
         question: 用户的自然语言问题（中文）
 
     Returns:
-        Markdown 字符串：含生成的 SQL、推理说明、结果表格；失败时含错误诊断。
+        Markdown 字符串：含 SQL、推理、结果表格、图表标记。
     """
     result = nl2sql(question)
 
@@ -55,9 +34,19 @@ def query_database(question: str) -> str:
         parts.append(f"**错误:** {result.error}")
         return "\n\n".join(parts)
 
-    table_md = _format_rows_markdown(result.columns, result.rows)
+    df = pd.DataFrame(result.rows, columns=result.columns)
+    report = render_report(df, title=question, with_chart=True, max_rows=50)
+
+    chart_note = ""
+    if report.chart_data_uri:
+        kind_zh = {"bar": "柱状图", "line": "折线图", "pie": "饼图"}.get(
+            report.chart_kind, report.chart_kind
+        )
+        chart_note = f"\n\n📊 已生成{kind_zh}（前端可在 SSE meta 事件中接收）"
+
     return (
         f"**SQL:**\n```sql\n{result.sql}\n```\n\n"
         f"**思路:** {result.reasoning}\n\n"
-        f"**结果（{result.row_count} 行）:**\n{table_md}"
+        f"**结果（{result.row_count} 行）:**\n{report.markdown}"
+        f"{chart_note}"
     )
