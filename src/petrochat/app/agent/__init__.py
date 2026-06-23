@@ -1,4 +1,4 @@
-"""Agent 层：LangGraph StateGraph、ReAct 节点。"""
+"""Agent layer: LangGraph Supervisor 编排与子节点。"""
 
 from .graph import build_graph, build_initial_state
 

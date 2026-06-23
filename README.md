@@ -1,96 +1,164 @@
 # PetroChat-Agent
 
-> 石化领域智能问答与质检 Agent 平台 —— 一个用真实石化标准规范数据集，把 RAG / Tool Calling / MCP / 多 Agent 协作四大能力完整跑通的 Python 工程实践项目。
+> 石化领域智能问答与多 Agent 数据分析平台。项目基于真实石化规范文档和事务任务业务库，完整跑通 RAG、Tool Calling、MCP、Supervisor 多 Agent、NL2SQL 和报表输出，是面向 AI/LLM 应用研发岗位的 Python 工程实践项目。
 
-[![Phase 1](https://img.shields.io/badge/phase--1-RAG%20%E9%97%AE%E7%AD%94-brightgreen)](#)
+[![Version](https://img.shields.io/badge/version-v1.0--multiagent-brightgreen)](#)
 [![Python](https://img.shields.io/badge/python-3.12-blue)](#)
-[![LangGraph](https://img.shields.io/badge/LangGraph-1.x-orange)](#)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Supervisor-orange)](#)
+[![FastAPI](https://img.shields.io/badge/FastAPI-SSE-teal)](#)
 
-## 项目特色
+## 项目亮点
 
-- **垂直领域护城河**：基于真实的中石化炼化企业设备完整性管理体系规范（4 份共 1500+ 条款），具备通用 Agent 项目缺乏的领域纵深。
-- **独有质检节点（规划中）**：三维评分 Agent（正确性 / 完整性 / 有用性），将答案质量评估闭环纳入系统。
-- **完整工程能力栈**：一个项目同时覆盖 RAG / Tool Calling / MCP / 多 Agent 四大主流能力。
-- **对齐主流生态**：LangGraph 1.x + 官方 MCP SDK + FastAPI + Chroma HTTP，紧贴 2026 年 AI 应用研发主流技术栈。
+- **垂直领域护城河**：基于 4 份石化规范文档构建 1500+ chunks 知识库，并接入事务/任务业务库，避免通用聊天项目的同质化。
+- **四阶段工程演进**：从单节点 RAG 起步，逐步扩展到 Tool Calling、MCP Server，再到 Supervisor 多 Agent 编排，每个阶段都有独立 tag 和测试。
+- **多 Agent 路由闭环**：`supervisor` 根据意图路由到 `qa`、`sql`、`general` 三个子 agent，让规范问答、数据查询、复合工具任务职责清晰。
+- **安全 NL2SQL**：使用 DeepSeek function calling 生成 SQL，`sqlglot` AST 校验只允许单条 SELECT，自动注入 LIMIT，并用 MySQL `MAX_EXECUTION_TIME` 控制慢查询。
+- **可演示报表输出**：SQL 查询结果自动转 Markdown 表，适合的数据生成 base64 PNG 图表，通过 SSE `meta` 事件传给前端。
+- **工程可观测与可测试**：LangSmith 链路追踪、FastAPI SSE 流式输出、87 个 pytest 测试覆盖核心逻辑和外部依赖探活。
 
 ## 技术栈
 
 | 模块 | 选型 |
 | --- | --- |
 | 语言 | Python 3.12 |
-| Agent 编排 | LangGraph 1.x（Supervisor 模式预留） |
+| Agent 编排 | LangGraph StateGraph（Supervisor 模式） |
 | LLM 应用框架 | LangChain |
-| Web 框架 | FastAPI（SSE 流式输出） |
-| 向量库 | Chroma（HTTP 服务，Docker 部署） |
+| Web 框架 | FastAPI + SSE |
+| 向量库 | Chroma HTTP 服务 |
 | Chat / 推理 | DeepSeek `deepseek-chat`（OpenAI 兼容） |
 | Embedding | 阿里云百炼 `text-embedding-v3`（1024 维） |
-| 链路追踪 | LangSmith |
-| MCP | 官方 mcp SDK（FastMCP，第三阶段） |
+| 数据库 | MySQL 8 + SQLAlchemy + PyMySQL |
+| NL2SQL 安全 | sqlglot AST 校验 + 只读账号 + MySQL 执行超时 |
+| 报表 | pandas + matplotlib |
+| MCP | 官方 `mcp` SDK + FastMCP + langchain-mcp-adapters |
 | 依赖管理 | uv |
 | 部署 | Docker + Docker Compose |
 
 ## 项目结构
 
-```
+```text
 PetroChat-Agent/
-├── pyproject.toml          # uv 项目与依赖定义
-├── docker-compose.yml      # Chroma 容器
-├── .env.example
-├── data/raw/               # 原始规范文档（不提交）
-├── scripts/                # 离线脚本
-│   ├── convert_doc.py      # .doc → .docx 批量转换
-│   ├── ingest.py           # 全量入库
-│   ├── ask.py              # 命令行问答
-│   └── check.py            # 检索结果检视
+├── pyproject.toml
+├── docker-compose.yml
+├── data/
+│   ├── raw/                 # 原始规范文档，不提交真实数据
+│   ├── schema.md            # MySQL schema 审阅材料
+│   └── sql_examples.yaml    # NL2SQL few-shot 与业务知识铁则
+├── scripts/
+│   ├── ingest.py            # 规范文档入 Chroma
+│   ├── ask.py               # 命令行规范问答
+│   ├── ask_sql.py           # 命令行 NL2SQL 查询
+│   └── dump_schema.py       # 导出 MySQL schema
 ├── tests/
 └── src/petrochat/
-    ├── main.py             # FastAPI 入口
+    ├── main.py              # FastAPI 入口
     └── app/
-        ├── api/            # 路由 + SSE
-        ├── agent/          # LangGraph 编排
+        ├── api/             # 路由 + SSE
+        ├── agent/           # LangGraph 图与节点
         │   ├── graph.py
-        │   ├── prompts.py
-        │   └── nodes/qa_node.py
-        ├── rag/            # 文档解析 + 向量库 + 检索器
-        │   ├── parser.py
-        │   ├── vector_store.py
-        │   └── retriever.py
-        ├── core/           # 配置 / 状态 / 实体 / LLM 客户端 / 可观测性
-        ├── quality/        # 三维质检（第四阶段）
-        ├── tools/          # 领域工具（第二阶段）
-        └── mcp/            # MCP Server（第三阶段）
+        │   └── nodes/
+        │       ├── supervisor_node.py
+        │       ├── qa_node.py
+        │       ├── sql_node.py
+        │       └── general_node.py
+        ├── core/            # 配置 / 状态 / 实体 / LLM 客户端 / LangSmith
+        ├── rag/             # 文档解析 / Chroma 原子操作 / Retriever
+        ├── tools/           # LangChain 工具：换算、检索、查条款、查数据库
+        ├── mcp/             # FastMCP Server + MCP Client
+        ├── sql/             # NL2SQL 生成 / 校验 / 执行 / schema
+        └── report/          # Markdown 表 + 图表渲染
 ```
 
-## 开发阶段路线图
+## 四阶段进度
 
-| 阶段 | 主题 | 状态 | Tag |
+| 阶段 | 主题 | 状态 | Tag / Commit |
 | --- | --- | --- | --- |
-| **① RAG 问答** | 单 Agent + 检索增强 | ✅ 完成 | `v0.1-rag` |
-| ② Tool Calling | Agent 自主调用工具 | 待启动 | `v0.2-tool` |
-| ③ MCP Server | 工具与主体解耦 | 待启动 | `v0.3-mcp` |
-| ④ 多 Agent 协作 | Supervisor + 评分闭环 | 待启动 | `v1.0-multiagent` |
+| 1 | RAG 问答 | 完成 | `v0.1-rag` |
+| 2 | Tool Calling | 完成 | `v0.2-tool` |
+| 3 | MCP Server | 完成 | `v0.3-mcp` |
+| 4 | Supervisor 多 Agent + NL2SQL + 报表 | 完成 | `v1.0-multiagent` |
 
-## 第一阶段已交付（v0.1-rag）
+### Phase 1: RAG 问答
 
-- [x] uv + src-layout 工程脚手架
-- [x] 配置层（pydantic-settings + SecretStr）
-- [x] 双策略文档解析器（outlineLvl + 编号正则）
-- [x] Chroma HTTP 向量库 7 个原子操作
-- [x] 全量入库脚本（按文件幂等更新 + dry-run）
-- [x] 检索器（LangChain BaseRetriever 适配）
-- [x] LangGraph 单节点 RAG（StateGraph）
-- [x] FastAPI 双端点（非流式 + SSE 流式 token 级推送）
-- [x] LangSmith 链路追踪
+- uv + src-layout 工程脚手架。
+- `pydantic-settings` 配置、LLM/Embedding 客户端工厂、TypedDict 状态和 Pydantic 实体。
+- `python-docx` 双策略解析：Word `outlineLvl` 优先，数字编号正则兜底。
+- Chroma HTTP 向量库 7 个原子操作：连接、集合、upsert、query、delete、count、reset。
+- LangChain `BaseRetriever` 适配，答案引用统一格式化。
+- FastAPI `/api/chat` 和 `/api/chat/stream`，支持 token 级 SSE。
 
-**当前能力**：把石化规范喂给系统后，可以用流式接口问答，答案带 `[N.N.N]` 章节引用 + 末尾列出引用文档。
+### Phase 2: Tool Calling
+
+- 4 个领域工具：`convert_unit`、`lookup_section`、`search_within_doc`、`retrieve_specs`。
+- ReAct 模式：agent 和 `ToolNode` 循环，LLM 自主决定是否检索或换算。
+- RAG-as-tool：规范检索从“每次先检索”升级为“按需检索”。
+
+### Phase 3: MCP Server
+
+- 用官方 FastMCP 将工具暴露为标准 MCP Server。
+- 支持 stdio 与 streamable-http 双传输。
+- 通过 `langchain-mcp-adapters` 桥接为 LangChain `BaseTool`。
+- `MCP_ENABLED` 配置开关让 agent 在本地工具与 MCP 工具之间无感切换。
+
+### Phase 4: 多 Agent 数据问答
+
+- MySQL 基础设施：SQLAlchemy 引擎单例、只读会话保护、健康检查、schema dump。
+- Schema 增强：表白名单、低基数字段枚举值采样、事务/任务语义纠偏。
+- NL2SQL 四件套：generator、validator、executor、agent 胶水函数。
+- 报表模块：DataFrame 转 Markdown 表，自动选择柱状图/折线图/饼图，base64 PNG 走 SSE 侧信道。
+- Supervisor 重构：`supervisor -> qa/sql/general`，知识题、数据题、复合题分流处理。
+
+当前路由策略：
+
+```mermaid
+flowchart LR
+    START["START"] --> SUP["supervisor"]
+    SUP -->|"规范/概念/条款"| QA["qa_node: RAG 问答"]
+    SUP -->|"事务/任务/统计"| SQL["sql_node: NL2SQL + 报表"]
+    SUP -->|"复合/换算/兜底"| GEN["general_node: ReAct 工具循环"]
+    GEN -->|"需要工具"| TOOLS["ToolNode"]
+    TOOLS --> GEN
+    QA --> END["END"]
+    SQL --> END
+    GEN --> END
+```
+
+## API
+
+### 非流式问答
+
+```http
+POST /api/chat
+Content-Type: application/json
+
+{"question": "什么是 ITPM 策略？"}
+```
+
+### SSE 流式问答
+
+```http
+POST /api/chat/stream
+Content-Type: application/json
+
+{"question": "统计各专业的事务数量"}
+```
+
+SSE 事件：
+
+| 事件 | 含义 |
+| --- | --- |
+| `token` | LLM 输出文本 chunk |
+| `tool_call` | LLM 决定调用工具 |
+| `tool_result` | 工具执行结果预览 |
+| `meta` | 引用、图表 data URI、图表类型、表格行数 |
+| `done` | 流结束 |
+| `error` | 异常信息 |
 
 ## 快速开始
 
-### 1. 安装 uv 与依赖
+### 1. 安装依赖
 
 ```powershell
-# Windows
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 cd D:\Project\pythonProject\PetroChat-Agent
 uv sync
 ```
@@ -98,9 +166,15 @@ uv sync
 ### 2. 配置环境变量
 
 ```powershell
-copy .env.example .env
-notepad .env   # 填入 DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / LANGSMITH_API_KEY
+Copy-Item .env.example .env
+notepad .env
 ```
+
+至少配置：
+
+- `DEEPSEEK_API_KEY`
+- `DASHSCOPE_API_KEY`
+- `MYSQL_*` 只读账号信息
 
 ### 3. 启动 Chroma
 
@@ -108,48 +182,71 @@ notepad .env   # 填入 DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / LANGSMITH_API_KEY
 docker compose up -d chroma
 ```
 
-### 4. 把规范放进 `data/raw/`，全量入库
+### 4. 入库规范文档
 
 ```powershell
-# 如果是 .doc 旧格式，先转换
-uv run python scripts/convert_doc.py data/raw/
-
-# 入库（首次约 3-5 分钟）
 uv run python scripts/ingest.py
 ```
 
-### 5. 启动 API 服务
+### 5. 启动 API
 
 ```powershell
 uv run uvicorn petrochat.main:app --reload --port 8000
 ```
 
-打开 http://localhost:8000/docs 即可在 Swagger UI 玩。
+打开 [http://localhost:8000/docs](http://localhost:8000/docs) 查看 Swagger UI。
 
-### 6. 命令行问答（不需启动服务）
+## 常用脚本
 
 ```powershell
-uv run python scripts/ask.py "什么是 ITPM 策略"
+# 命令行 RAG 问答
 uv run python scripts/ask.py "设备分级如何划分" --stream
+
+# 命令行 NL2SQL
+uv run python scripts/ask_sql.py "查询仪表专业的运行中事务"
+
+# 导出 schema 审阅材料
+uv run python scripts/dump_schema.py --tables affair affair_task -o data/schema.md
+
+# 测试
+uv run pytest -q
 ```
 
 ## 关键设计决策
 
-### 为什么不用 langchain-chroma？
+### 为什么 Chroma 用 HTTP client？
 
-`langchain-chroma` 硬依赖完整版 `chromadb`，会拉入 `chroma-hnswlib` 这个在 Windows 上**没有预编译 wheel** 的 C++ 扩展。改用 `chromadb-client`（HTTP only）+ Chroma Docker 服务，避开 MSVC 编译需求，且更贴近生产形态。
+`langchain-chroma` 会拉入本地 `chroma-hnswlib` 编译依赖，在 Windows 环境容易被 MSVC 卡住。项目改用 `chromadb-client` + Docker Chroma，既避开本地编译，也更接近服务化部署形态。
 
-### 为什么 Embedding 用阿里云百炼 + Chat 用 DeepSeek？
+### 为什么 NL2SQL 不直接执行 LLM 产物？
 
-各取所长。百炼 `text-embedding-v3` 是国内中文 embedding 标杆（8K 上下文、可变维度）；DeepSeek 在中文推理与代码任务上口碑好，且 `reasoner` 模型为第四阶段质检评分预留了 reasoning 能力。两者都通过 OpenAI 兼容协议调用，**只需要 `langchain-openai` 一个客户端**。
+业务库查询必须可控。当前链路先用结构化输出生成 SQL，再用 `sqlglot` 做 AST 校验，只允许单条 SELECT，并拒绝系统库访问；执行阶段再用只读事务和 MySQL 原生超时兜底。
 
-### 为什么"标题永远塞进 chunk 内容"？
+### 为什么 Phase 4 改成 NL2SQL + 报表？
 
-文件 1 的标题与正文分段，文件 2 的"编号即条款"（如 `1.4.1 备品配件是为满足…`）形态混在一起。统一让标题成为 chunk 内容首行，既兼容两种结构，又让向量检索能命中"目的依据""适用范围"等标题词。
+原说明书规划了三维质检评分，但项目第二轮目标更偏向“可演示的数据问答能力”。因此 Phase 4 保留 Supervisor 多 Agent 目标，将子任务调整为规范问答、业务数据查询和复合工具调用，面试展示时更容易形成端到端闭环。
 
-### 为什么 SSE 而不是 WebSocket？
+### 为什么图表走 SSE meta 侧信道？
 
-LLM 是单向输出（服务器 → 客户端），SSE 协议天然契合：HTTP/1.1 兼容、无需额外协议升级、Nginx/CDN 都原生支持。WebSocket 适合双向实时（聊天室、协同编辑），LLM 流式属于 SSE 经典场景。
+base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。后端只把 Markdown 表和图表标记写入答案，把真实图片放在 `meta.chart_data_uri`，前端可以独立渲染。
+
+## 测试状态
+
+当前测试覆盖 RAG 基础逻辑、工具、MCP 配置、SQL validator、SQL executor 探活、报表、Supervisor 和 API 结构。
+
+```text
+87 passed, 3 warnings
+```
+
+外部依赖类测试在 Chroma、Embedding Key 或 MySQL 不可达时会自动 skip，保证离线环境也能验证核心逻辑。
+
+## 后续可选增强
+
+- Vue3 前端：对话窗口、Markdown 渲染、SSE 消费、图表图片渲染。
+- 端到端评估集：把典型规范问答和 NL2SQL 样例参数化为回归测试。
+- 并发报表侧信道：把模块级 `_LAST_REPORT` 改为 `contextvars`，避免多用户并发串数据。
+- Docker 一键演示：补齐 MySQL 示例容器、Chroma 和 API 的 compose 编排。
+- LangSmith 截图：在 README 中补充 supervisor 路由、QA/SQL/General 三路 trace。
 
 ## License
 

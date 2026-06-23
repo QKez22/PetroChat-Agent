@@ -1,4 +1,4 @@
-"""FastAPI 应用入口。Phase 3: 加 MCP 初始化 lifespan。"""
+"""FastAPI 应用入口。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_langsmith()
 
-    # 启用 MCP 时，启动期一次性连接 MCP Server 并拉取工具列表
+    # 启用 MCP 时, 启动期一次性连接 MCP Server 并拉取工具列表
     if settings.mcp_enabled:
         from petrochat.app.mcp import init_mcp_tools_async
         await init_mcp_tools_async()
@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="PetroChat-Agent",
-        description="石化领域智能问答与质检 Agent 平台",
-        version="0.3.0",
+        description="石化领域智能问答与多 Agent 数据分析平台",
+        version="1.0.0",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -54,8 +54,8 @@ def create_app() -> FastAPI:
     async def root():
         return {
             "name": "PetroChat-Agent",
-            "version": "0.3.0",
-            "stage": "phase-3: MCP",
+            "version": "1.0.0",
+            "stage": "phase-4: multi-agent supervisor",
             "docs": "/docs",
         }
 
