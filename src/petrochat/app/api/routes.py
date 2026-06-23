@@ -115,9 +115,21 @@ async def _stream_events(question: str) -> AsyncGenerator[dict[str, str], None]:
                     "preview": result_text[:200],
                 })
 
-        # 整图结束后从累积答案抽 citations
+        # 整图结束后从累积答案抽 citations + 拿走最近一次报表（含 chart 的 data URI）
         citations = list(dict.fromkeys(_CITATION_PAT.findall(final_answer)))
-        yield _sse("meta", {"citations": citations})
+        meta: dict[str, Any] = {"citations": citations}
+
+        try:
+            from ..report import pop_last_report
+            rep = pop_last_report()
+            if rep and rep.chart_data_uri:
+                meta["chart_data_uri"] = rep.chart_data_uri
+                meta["chart_kind"] = rep.chart_kind
+                meta["table_row_count"] = rep.row_count
+        except Exception as e:
+            logger.warning("拉取 last_report 失败: {}", e)
+
+        yield _sse("meta", meta)
         yield _sse("done", {})
 
     except Exception as e:
