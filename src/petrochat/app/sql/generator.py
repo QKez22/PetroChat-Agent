@@ -1,10 +1,4 @@
-"""NL → SQL 生成器：DeepSeek 结构化输出。
-
-设计：
-  - schema markdown 用 lru_cache 锁住，避免每次问都打 information_schema
-  - few-shot 样例和"业务知识铁则"从 data/sql_examples.yaml 读
-  - 用 Pydantic 结构化输出：sql + reasoning，便于审计 / 排错
-"""
+"""NL → SQL 生成器：DeepSeek 结构化输出。"""
 
 from __future__ import annotations
 
@@ -13,7 +7,6 @@ from pathlib import Path
 
 import yaml
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -26,32 +19,18 @@ EXAMPLES_FILE = PROJECT_ROOT / "data" / "sql_examples.yaml"
 
 
 class SqlPlan(BaseModel):
-    """LLM 的结构化输出。"""
-
     sql: str = Field(description="MySQL 8 兼容的 SELECT 语句，单条，不要分号结尾")
-    reasoning: str = Field(
-        description="一两句话说明：选了哪些表 / 关键字段 / 注意点（用中文）",
-    )
+    reasoning: str = Field(description="一两句话说明：选了哪些表 / 关键字段 / 注意点（中文）")
 
 
 @lru_cache(maxsize=1)
 def _cached_schema_md() -> str:
-    """schema 在进程生命周期内只查一次。"""
     return format_schemas_for_llm(dump_all_schemas())
 
 
 @lru_cache(maxsize=1)
 def _cached_examples() -> tuple[list[dict], list[str]]:
-    """(few-shot 样例, 业务知识铁则)。
-
-    YAML 结构（顶层 dict）：
-      examples:
-        - question: ...
-          sql: |
-            ...
-      domain_knowledge:
-        - "..."
-    """
+    """YAML 结构 {examples: [...], domain_knowledge: [...]}。"""
     if not EXAMPLES_FILE.exists():
         return [], []
     raw = yaml.safe_load(EXAMPLES_FILE.read_text(encoding="utf-8"))
@@ -86,22 +65,18 @@ def _build_system_prompt() -> str:
 
 【硬性规则】
 1. 只能产出单条 SELECT 语句，禁止 INSERT/UPDATE/DELETE/DDL；不要分号结尾。
-2. 严格遵守上面的"业务知识铁则"，特别是反直觉字段（trigger_status 含义、ticket_flag 0=是）和 varchar 时间字段的处理。
+2. 严格遵守上面的【业务知识铁则】，特别是反直觉字段和 varchar 时间字段的处理。
 3. MySQL 8 方言，可以用 CTE / 窗口函数。
-4. 默认会自动注入 LIMIT {s.sql_default_limit}，你不必显式写 LIMIT；除非用户问 Top-N 之类需要小 LIMIT。
+4. 默认会自动注入 LIMIT {s.sql_default_limit}，你不必显式写 LIMIT；除非用户问 Top-N。
 5. 字段使用反引号或不加都行；最终 SQL 要可直接执行。
 """
 
 
 def generate_sql(question: str) -> SqlPlan:
-    """把自然语言问题转成 SqlPlan（sql + reasoning）。
+    """把自然语言问题转成 SqlPlan。
 
-    关键参数 method="function_calling"：
-      DeepSeek（含国内多数厂商）的 OpenAI 兼容层**不支持** response_format=json_schema
-      （那是 OpenAI 最新私有特性），会返回
-      'This response_format type is unavailable now' 的 400 错误。
-      function_calling 走 tool_calls 机制，跟 phase 2 的 bind_tools 同源，
-      DeepSeek / 通义 / 智谱都支持。
+    method='function_calling'：DeepSeek 兼容层不支持 json_schema response_format，
+    必须用 function_calling 模式（兼容 phase 2 的 bind_tools 机制）。
     """
     llm = get_chat_llm().with_structured_output(SqlPlan, method="function_calling")
     sys_prompt = _build_system_prompt()
