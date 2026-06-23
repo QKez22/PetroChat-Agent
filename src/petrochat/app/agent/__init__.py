@@ -1,5 +1,5 @@
-"""Agent 层：LangGraph StateGraph、Supervisor、各子节点。"""
+"""Agent 层：LangGraph StateGraph、ReAct 节点。"""
 
-from .graph import build_graph
+from .graph import build_graph, build_initial_state
 
-__all__ = ["build_graph"]
+__all__ = ["build_graph", "build_initial_state"]

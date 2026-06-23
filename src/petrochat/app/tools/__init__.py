@@ -1,5 +1,20 @@
-"""工具层：领域工具（单位换算、参数查表等）。
+"""领域工具集合。"""
 
-依赖：core
-当前阶段：第二阶段才会真正实现，第一阶段仅保留包结构。
-"""
+from .lookup import lookup_section, search_within_doc
+from .retrieve import retrieve_specs
+from .units import convert_unit
+
+ALL_TOOLS = [
+    convert_unit,
+    lookup_section,
+    search_within_doc,
+    retrieve_specs,
+]
+
+__all__ = [
+    "convert_unit",
+    "lookup_section",
+    "search_within_doc",
+    "retrieve_specs",
+    "ALL_TOOLS",
+]

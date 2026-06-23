@@ -1,131 +1,130 @@
 """FastAPI 路由：问答接口（同步 + SSE 流式）。
 
-接口设计：
-  POST /api/chat         非流式，返回完整答案（适合脚本/测试）
-  POST /api/chat/stream  SSE 流式，按 token 推送（适合前端聊天界面）
-
-SSE 事件类型：
-  event: token   data: {"text": "..."}        # LLM 输出的每个 token chunk
-  event: meta    data: {"retrieved": [...], "citations": [...]}  # 检索结果与引用
-  event: done    data: {}                     # 流结束
-  event: error   data: {"message": "..."}     # 任一环节抛错
+Phase 2 更新：
+  - graph 改为 ReAct，主状态在 state["messages"]
+  - 答案 = 最后一条 AIMessage 的 content
+  - citations 从答案文本中正则抽取 [N.N.N] 模式
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
-from ..agent import build_graph
+from ..agent import build_graph, build_initial_state
 from ..core.models import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
+# 用于从答案文本里抽取 [N.N.N] 形式的章节号引用
+_CITATION_PAT = re.compile(r"\[(\d+(?:\.\d+){1,3})\]")
+
+
+def _extract_answer_and_citations(state: dict) -> tuple[str, list[str]]:
+    """从 ReAct 图的最终 state 中抽取答案与引用编号。"""
+    msgs = state.get("messages") or []
+    answer = ""
+    # 最后一条不含 tool_calls 的 AIMessage 即最终答案
+    for m in reversed(msgs):
+        if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
+            answer = m.content if isinstance(m.content, str) else str(m.content)
+            break
+
+    citations = list(dict.fromkeys(_CITATION_PAT.findall(answer)))  # 保序去重
+    return answer, citations
+
 
 # ============================================================
-# 非流式接口（Swagger 友好，给脚本/测试用）
+# 非流式接口
 # ============================================================
 @router.post("/chat", response_model=ChatResponse, summary="问答（非流式）")
 async def chat(req: ChatRequest) -> ChatResponse:
-    """一次性返回完整答案与引用。
-
-    内部仍走 graph.ainvoke，只是把流合并成最终结果再回给客户端。
-    """
     graph = build_graph()
     try:
-        result = await graph.ainvoke({"question": req.question})
+        result = await graph.ainvoke(build_initial_state(req.question))
     except Exception as e:
         logger.exception("graph.ainvoke 失败")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    return ChatResponse(
-        answer=result.get("answer", ""),
-        citations=result.get("citations") or [],
-        # 第一阶段不带评分，留 None
-        score=None,
-    )
+    answer, citations = _extract_answer_and_citations(result)
+    return ChatResponse(answer=answer, citations=citations, score=None)
 
 
 # ============================================================
 # SSE 流式接口
 # ============================================================
-def _sse_event(event: str, data: dict[str, Any]) -> dict[str, str]:
-    """格式化为 sse-starlette 接受的字典形式。"""
+def _sse(event: str, data: dict[str, Any]) -> dict[str, str]:
     return {"event": event, "data": json.dumps(data, ensure_ascii=False)}
 
 
 async def _stream_events(question: str) -> AsyncGenerator[dict[str, str], None]:
-    """把 LangGraph 的事件流翻译成 SSE 事件流。
+    """把 LangGraph 事件流翻译成 SSE 事件流。
 
-    依赖 ChatOpenAI(streaming=True) 把 LLM 的 token chunks 通过 callback 冒泡，
-    astream_events(version="v2") 接住它们再分发。
+    SSE 事件类型：
+      token       LLM 每个文本 chunk（最频繁）
+      tool_call   LLM 决定调工具时（含工具名 + 参数，让前端可显示"思考中..."）
+      tool_result 工具返回时（含工具名 + 截断的结果）
+      meta        全流程结束时（含 citations）
+      done        流结束
+      error       任一环节抛错
     """
     graph = build_graph()
-    state = {"question": question}
-
-    # 缓存检索完成后的 docs 和最终 state，结束时一并 emit
-    retrieved_docs: list[dict[str, Any]] = []
-    citations: list[str] = []
+    state = build_initial_state(question)
+    final_answer = ""
 
     try:
         async for event in graph.astream_events(state, version="v2"):
             kind = event.get("event")
 
-            # ---- LLM token 流（最频繁的事件）----
+            # ---- LLM token 流（最频繁）----
             if kind == "on_chat_model_stream":
                 chunk = event.get("data", {}).get("chunk")
                 if isinstance(chunk, AIMessageChunk) and chunk.content:
-                    yield _sse_event("token", {"text": chunk.content})
+                    text = chunk.content if isinstance(chunk.content, str) else str(chunk.content)
+                    final_answer += text
+                    yield _sse("token", {"text": text})
 
-            # ---- 检索完成 ----
-            elif kind == "on_retriever_end":
-                output = event.get("data", {}).get("output", [])
-                retrieved_docs = [
-                    {
-                        "chunk_id": d.metadata.get("chunk_id"),
-                        "section_number": d.metadata.get("section_number"),
-                        "source_doc": d.metadata.get("source_doc"),
-                        "score": d.metadata.get("score"),
-                        "content_preview": d.page_content[:120],
-                    }
-                    for d in output
-                ]
+            # ---- LLM 决定调工具 ----
+            elif kind == "on_chat_model_end":
+                output = event.get("data", {}).get("output")
+                if isinstance(output, AIMessage) and getattr(output, "tool_calls", None):
+                    for tc in output.tool_calls:
+                        yield _sse("tool_call", {
+                            "name": tc.get("name"),
+                            "args": tc.get("args"),
+                        })
 
-            # ---- 整个 graph 结束，从最终 state 拿 citations ----
-            elif kind == "on_chain_end" and event.get("name") == "LangGraph":
-                output = event.get("data", {}).get("output", {})
-                citations = output.get("citations") or []
+            # ---- 工具执行完成 ----
+            elif kind == "on_tool_end":
+                tool_name = event.get("name")
+                output = event.get("data", {}).get("output")
+                result_text = ""
+                if isinstance(output, ToolMessage):
+                    result_text = output.content if isinstance(output.content, str) else str(output.content)
+                elif isinstance(output, str):
+                    result_text = output
+                yield _sse("tool_result", {
+                    "name": tool_name,
+                    "preview": result_text[:200],
+                })
 
-        # 节点流结束，统一推送 meta + done
-        yield _sse_event("meta", {
-            "retrieved": retrieved_docs,
-            "citations": citations,
-        })
-        yield _sse_event("done", {})
+        # 整图结束后从累积答案抽 citations
+        citations = list(dict.fromkeys(_CITATION_PAT.findall(final_answer)))
+        yield _sse("meta", {"citations": citations})
+        yield _sse("done", {})
 
     except Exception as e:
         logger.exception("SSE 流处理失败")
-        yield _sse_event("error", {"message": str(e)})
+        yield _sse("error", {"message": str(e)})
 
 
 @router.post("/chat/stream", summary="问答（SSE 流式）")
 async def chat_stream(req: ChatRequest) -> EventSourceResponse:
-    """SSE 流式问答。
-
-    前端用法（JavaScript）：
-        const resp = await fetch("/api/chat/stream", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({question: "..."}),
-        });
-        const reader = resp.body.getReader();
-        ...
-    （后续 1.9 之后会给前端示例代码）
-    """
     return EventSourceResponse(_stream_events(req.question))

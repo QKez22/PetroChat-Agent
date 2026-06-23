@@ -2,8 +2,8 @@
 
 用法：
     uv run python scripts/ask.py "什么是 ITPM 策略？"
-    uv run python scripts/ask.py "设备分级如何划分" --top-k 5
-    uv run python scripts/ask.py "..." --stream         # 流式打印 token
+    uv run python scripts/ask.py "1 MPa 等于多少 psi" --stream
+    uv run python scripts/ask.py "查一下 4.2.2 在设备完整性管理体系里写什么"
 """
 
 from __future__ import annotations
@@ -15,45 +15,52 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from petrochat.app.agent import build_graph  # noqa: E402
+from langchain_core.messages import AIMessage, ToolMessage  # noqa: E402
+
+from petrochat.app.agent import build_graph, build_initial_state  # noqa: E402
 from petrochat.app.core import setup_langsmith  # noqa: E402
 
-# CLI 调用也启用 LangSmith 追踪（如果 .env 配了的话）
 setup_langsmith()
+
+
+def _extract_answer(state) -> str:
+    """从最终 state 取最后一条无 tool_calls 的 AIMessage。"""
+    for m in reversed(state.get("messages") or []):
+        if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
+            return m.content if isinstance(m.content, str) else str(m.content)
+    return "(无答案)"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="石化规范问答")
-    parser.add_argument("question", help="要问的问题")
+    parser.add_argument("question")
     parser.add_argument("--stream", action="store_true",
-                        help="流式输出（按 LangGraph 节点事件流）")
+                        help="按节点事件流式打印")
     args = parser.parse_args()
 
     graph = build_graph()
-    initial_state = {"question": args.question}
+    state = build_initial_state(args.question)
 
     if args.stream:
-        # graph.stream 按节点事件流，每次 yield 一个节点的输出
         print("─" * 60)
-        for event in graph.stream(initial_state):
+        for event in graph.stream(state):
             for node_name, output in event.items():
-                print(f"\n[节点 {node_name}]")
-                if "answer" in output:
-                    print(output["answer"])
-                if "citations" in output and output["citations"]:
-                    print("\n引用来源:")
-                    for c in output["citations"]:
-                        print(f"  - {c}")
-        print("─" * 60)
+                msgs = output.get("messages") or []
+                for m in msgs:
+                    if isinstance(m, AIMessage):
+                        if getattr(m, "tool_calls", None):
+                            for tc in m.tool_calls:
+                                print(f"\n🔧 [agent] 调用工具 {tc['name']}({tc.get('args')})")
+                        elif m.content:
+                            print(f"\n💬 [agent] {m.content}")
+                    elif isinstance(m, ToolMessage):
+                        preview = (m.content if isinstance(m.content, str) else str(m.content))[:300]
+                        print(f"\n📦 [{m.name}] {preview}")
+        print("\n" + "─" * 60)
     else:
-        result = graph.invoke(initial_state)
+        result = graph.invoke(state)
         print("\n══════════ 答案 ══════════")
-        print(result.get("answer", "(无答案)"))
-        cites = result.get("citations") or []
-        if cites:
-            print("\n══════════ 引用来源 ══════════")
-            for c in cites:
-                print(f"  - {c}")
+        print(_extract_answer(result))
         print()
     return 0
 
