@@ -25,6 +25,14 @@ dependencies = [
     # MCP（第三阶段）
     "mcp>=1.2.0,<2.0",
     "langchain-mcp-adapters>=0.1.0,<0.2",
+    # MySQL + NL2SQL + 报表（第四阶段）
+    "sqlalchemy>=2.0.30,<3.0",
+    "pymysql>=1.1.0,<2.0",
+    "cryptography>=42.0.0,<46.0",  # pymysql 8.0 caching_sha2_password 必须
+    "pandas>=2.2.0,<3.0",
+    "sqlglot>=23.0,<27.0",          # SQL AST 解析（安全校验）
+    "matplotlib>=3.8.0,<4.0",
+    "pyyaml>=6.0,<7.0",
     # 可观测性
     "langsmith>=0.1.140,<1.0",
     "loguru>=0.7.2,<1.0",

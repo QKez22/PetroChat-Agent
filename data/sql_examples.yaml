@@ -1,0 +1,143 @@
+# NL2SQL few-shot 样例库
+
+examples:
+  - question: 查询某专业下所有运行中的事务
+    sql: |
+      SELECT affair_id, affair_name, specialty, area, trigger_time, deadline
+      FROM affair
+      WHERE specialty = '仪' AND trigger_status = 1
+      ORDER BY trigger_time ASC;
+    note: |
+      关键：【事务】对应 affair 表（不是 affair_task）。
+      affair_id / deadline / trigger_status 都只在 affair 表里。
+      specialty 是单字枚举：综合/动/静/电/仪/其它。
+
+  - question: 查询需要开票且需要线上检查的事务清单
+    sql: |
+      SELECT affair_code, affair_name, execution_department, execution_role, report_user
+      FROM affair
+      WHERE ticket_flag = 0
+        AND check_flag = 0
+        AND trigger_status != -1;
+    note: ticket_flag/check_flag 反直觉，0 才是【是】；这些字段都在 affair 表
+
+  - question: 统计各执行部门的事务数量及类型分布
+    sql: |
+      SELECT
+        execution_department,
+        affair_type,
+        COUNT(*) AS total,
+        SUM(CASE WHEN trigger_status = 1 THEN 1 ELSE 0 END) AS running_count,
+        SUM(CASE WHEN trigger_status = 0 THEN 1 ELSE 0 END) AS stopped_count
+      FROM affair
+      WHERE trigger_status != -1
+      GROUP BY execution_department, affair_type
+      ORDER BY execution_department, total DESC;
+
+  - question: 查询未来 3 天内即将到期的事务
+    sql: |
+      SELECT affair_name, execution_department, execution_role, deadline, trigger_status
+      FROM affair
+      WHERE STR_TO_DATE(deadline, '%Y-%m-%d %H:%i:%s') BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 3 DAY)
+        AND trigger_status = 1
+      ORDER BY deadline ASC;
+    note: deadline 是 varchar，要 STR_TO_DATE 才能跟 NOW() 比较；deadline 只在 affair 表
+
+  - question: 某事务下所有任务的完成情况
+    sql: |
+      SELECT
+        a.affair_name, a.specialty, a.execution_department,
+        t.task_id, t.task_name, t.task_properties,
+        t.execution_role, t.report_user, t.report_time
+      FROM affair a
+      LEFT JOIN affair_task t ON a.affair_id = t.associated_affair_id
+      WHERE a.affair_id = :affair_id
+      ORDER BY t.report_time DESC;
+    note: 关联键是 affair.affair_id ↔ affair_task.associated_affair_id（不是 id 字段）
+
+  - question: 统计每个事务下的任务数量及上传情况
+    sql: |
+      SELECT
+        a.affair_id, a.affair_name, a.affair_level, a.execution_department,
+        COUNT(t.id) AS total_tasks,
+        SUM(CASE WHEN t.upload_auto = '是' THEN 1 ELSE 0 END) AS auto_upload_count,
+        SUM(CASE WHEN t.upload_auto = '否' THEN 1 ELSE 0 END) AS manual_upload_count,
+        SUM(CASE WHEN t.report_time IS NOT NULL THEN 1 ELSE 0 END) AS submitted_count
+      FROM affair a
+      LEFT JOIN affair_task t ON a.affair_id = t.associated_affair_id
+      WHERE a.trigger_status = 1
+      GROUP BY a.affair_id, a.affair_name, a.affair_level, a.execution_department
+      ORDER BY total_tasks DESC;
+    note: upload_auto 字段是中文枚举（是/否）
+
+  - question: 按设备维度查询任务执行情况
+    sql: |
+      SELECT
+        t.body_equipment_name, t.body_equipment_code, t.technical_id_code,
+        t.equipment_level, t.zz_name,
+        COUNT(t.id) AS task_count,
+        COUNT(DISTINCT t.associated_affair_id) AS affair_count,
+        GROUP_CONCAT(DISTINCT t.maintenance_type) AS maintenance_types,
+        MAX(t.report_time) AS last_report_time
+      FROM affair_task t
+      INNER JOIN affair a ON t.associated_affair_id = a.affair_id
+      WHERE a.trigger_status != -1
+        AND t.body_equipment_code IS NOT NULL
+      GROUP BY t.body_equipment_code, t.body_equipment_name, t.technical_id_code,
+               t.equipment_level, t.zz_name
+      ORDER BY task_count DESC;
+
+  - question: 查询炼油一部的所有运行中事务
+    sql: |
+      SELECT affair_id, affair_name, specialty, execution_department, trigger_time
+      FROM affair
+      WHERE execution_department LIKE '%炼油一部%'
+        AND trigger_status = 1
+      ORDER BY trigger_time ASC;
+    note: execution_department 是逗号拼接字符串，必须用 LIKE；事务表是 affair
+
+# 业务知识铁则
+domain_knowledge:
+  - |-
+    【最重要】两张表别搞混：
+    - 事务 = affair 表（调度配置层，每条是一类周期任务定义）
+    - 任务 = affair_task 表（事务下的具体执行任务，关联到设备）
+    用户说【事务】用 affair；说【任务/巡检/检修/执行情况】多半是 affair_task。
+  - |-
+    字段归属（务必区分）：
+    - 只在 affair 表的：affair_id / deadline / trigger_status / ticket_flag / check_flag /
+      execution_department / execution_role / affair_code / affair_level / xxl_id /
+      operate_time / next_trigger_time / change_time
+    - 只在 affair_task 表的：task_id / associated_affair_id / task_name / task_properties /
+      report_user / report_time / 全部设备字段（body_equipment_*、technical_id_code、
+      equipment_level、zz_name、task_equipment_*）、upload_auto、maintenance_type 等
+    - 两张表都有的：specialty / area / affair_name / affair_type / execution_type /
+      trigger_time / frequency / new_trigger_time / template_name / template_path /
+      job_content / module（注意：trigger_status、ticket_flag 不在 affair_task！）
+  - |-
+    字段 trigger_status：0=停止, 1=运行, -1=已删除（查询通常要排除 -1）。仅 affair 表有此字段。
+  - |-
+    字段 ticket_flag / check_flag：0=是（需要），1=否（反直觉，0 不是 false）。仅 affair 表有这两个字段。
+  - |-
+    字段 upload_auto：枚举字符串 是 / 否，不是 boolean。仅 affair_task 表有此字段。
+  - |-
+    时间字段 trigger_time / deadline / new_trigger_time / next_trigger_time 是 varchar(255)，
+    比较时需要 STR_TO_DATE 转换；operate_time / report_time 是真正的 datetime 可直接比较。
+  - |-
+    表关联键：affair.affair_id (varchar) ↔ affair_task.associated_affair_id (varchar)，
+    不要用 id 字段（id 是各表自增主键，跨表无意义）。
+  - |-
+    specialty 字段实际取值（单字符为主）：综合 / 动 / 静 / 电 / 仪 / 其它。
+    用户口语说【仪表专业 / 仪表】都对应 specialty = 仪；
+    【动设备 / 转动设备】对应 动；【静设备】对应 静；【电气】对应 电。
+    一律映射到单字枚举，不要写全称。
+  - |-
+    area 字段实际取值：炼油 / 全厂 / 乙烯。
+  - |-
+    affair_type 字段实际取值：会议总结类 / 检查巡检类 / 维护活动类 / 执行确认类。
+  - |-
+    execution_type 字段是含逗号的中文字符串（不是 enum），如：
+    线上执行,自动生成表单 / 线下执行,上传表单 等。
+  - |-
+    execution_department / execution_role 字段是多个部门或岗位用英文逗号拼接的字符串。
+    匹配单个部门时用 LIKE %部门名%，不要用 = 完全匹配。
