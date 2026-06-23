@@ -72,6 +72,12 @@ data/interim/
 *.log
 logs/
 
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
 # LangGraph checkpoint（如果用 SQLite 持久化）
 checkpoints/
 *.sqlite
