@@ -1,6 +1,8 @@
-"""FastAPI 应用入口。"""
+"""FastAPI 应用入口。Phase 3: 加 MCP 初始化 lifespan。"""
 
 from __future__ import annotations
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,14 +12,30 @@ from petrochat.app.api import router as api_router
 from petrochat.app.core import get_settings, setup_langsmith
 
 
-def create_app() -> FastAPI:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用启动/关闭钩子。"""
     settings = get_settings()
     setup_langsmith()
 
+    # 启用 MCP 时，启动期一次性连接 MCP Server 并拉取工具列表
+    if settings.mcp_enabled:
+        from petrochat.app.mcp import init_mcp_tools_async
+        await init_mcp_tools_async()
+
+    logger.info("App ready: env={} mcp_enabled={} chroma={} chat_model={}",
+                settings.app_env, settings.mcp_enabled,
+                settings.chroma_url, settings.deepseek_chat_model)
+    yield
+    logger.info("App shutting down")
+
+
+def create_app() -> FastAPI:
     app = FastAPI(
         title="PetroChat-Agent",
         description="石化领域智能问答与质检 Agent 平台",
-        version="0.1.0",
+        version="0.3.0",
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -26,8 +44,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    logger.info("App starting: env={} chroma={} chat_model={}",
-                settings.app_env, settings.chroma_url, settings.deepseek_chat_model)
     app.include_router(api_router)
 
     @app.get("/health")
@@ -38,8 +54,8 @@ def create_app() -> FastAPI:
     async def root():
         return {
             "name": "PetroChat-Agent",
-            "version": "0.1.0",
-            "stage": "phase-1: RAG 问答",
+            "version": "0.3.0",
+            "stage": "phase-3: MCP",
             "docs": "/docs",
         }
 
@@ -54,6 +70,8 @@ def create_app() -> FastAPI:
             "reasoner_model": s.deepseek_reasoner_model,
             "embedding_model": s.embedding_model,
             "embedding_dim": s.embedding_dim,
+            "mcp_enabled": s.mcp_enabled,
+            "mcp_transport": s.mcp_transport,
             "deepseek_api_key_set": bool(s.deepseek_api_key.get_secret_value()),
             "dashscope_api_key_set": bool(s.dashscope_api_key.get_secret_value()),
             "langsmith_tracing": s.langsmith_tracing,

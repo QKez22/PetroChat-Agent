@@ -1,11 +1,4 @@
-"""集中配置管理。
-
-设计要点：
-1. 用 pydantic-settings 自动从 .env 加载配置 + 类型校验，避免散落的 os.getenv 调用。
-2. 用 @lru_cache 做单例，整个应用生命周期共享一份配置。
-3. 字段名与 .env 中的环境变量名严格一一对应（大小写不敏感）。
-4. 敏感字段（API Key）用 SecretStr，避免被日志或 repr 意外打印。
-"""
+"""集中配置管理。"""
 
 from __future__ import annotations
 
@@ -15,7 +8,6 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -44,7 +36,6 @@ class Settings(BaseSettings):
     dashscope_base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1")
     embedding_model: str = Field(default="text-embedding-v3")
     embedding_dim: int = Field(default=1024)
-    # 阿里云百炼实测上限 10；切到 OpenAI 官方时可调到 100+
     embedding_batch_size: int = Field(default=10)
 
     # Chroma
@@ -58,6 +49,13 @@ class Settings(BaseSettings):
     langsmith_project: str = Field(default="petrochat-agent")
     langsmith_endpoint: str = Field(default="https://api.smith.langchain.com")
 
+    # MCP (Phase 3)
+    mcp_enabled: bool = Field(default=False)
+    mcp_transport: str = Field(default="stdio")
+    mcp_server_command: str = Field(default="python")
+    mcp_server_args: str = Field(default="-m petrochat.app.mcp.server")
+    mcp_server_url: str = Field(default="http://localhost:8765/mcp")
+
     @property
     def chroma_url(self) -> str:
         return f"http://{self.chroma_host}:{self.chroma_port}"
@@ -65,5 +63,4 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """获取全局配置单例。"""
     return Settings()
