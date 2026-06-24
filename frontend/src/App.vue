@@ -10,11 +10,15 @@ import {
   Download,
   FileText,
   Gauge,
+  KeyRound,
   Loader2,
+  Lock,
+  LogOut,
   MessageSquareText,
   RefreshCw,
   Send,
   Server,
+  ShieldCheck,
   Sparkles,
   Trash2,
   User,
@@ -22,7 +26,7 @@ import {
 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, ref } from "vue";
 
-import { checkHealth, sendChat, streamChat } from "./services/chatStream";
+import { checkHealth, getMe, login, sendChat, streamChat } from "./services/chatStream";
 
 const md = new MarkdownIt({
   html: false,
@@ -53,11 +57,23 @@ const examples = [
   },
 ];
 
+const adminCards = [
+  { label: "用户与角色", value: "user 表 / authority_flag" },
+  { label: "知识库管理", value: "文档 / Chroma / 重建" },
+  { label: "Agent 配置", value: "提示词 / 模型参数 / 工具" },
+  { label: "审计观察", value: "问答 / 工具 / 质量指标" },
+];
+
+const TOKEN_STORAGE_KEY = "petrochat.auth.token";
+const USER_STORAGE_KEY = "petrochat.auth.user";
 const LOG_STORAGE_KEY = "petrochat.admin.turns";
 const SESSION_STORAGE_KEY = "petrochat.current.session";
 
 const messages = ref([]);
 const draft = ref("");
+const loginForm = ref({ username: "admin", password: "admin" });
+const loginError = ref("");
+const isLoggingIn = ref(false);
 const isStreaming = ref(false);
 const backendStatus = ref("checking");
 const backendMessage = ref("连接中");
@@ -65,24 +81,42 @@ const activeController = ref(null);
 const chatBody = ref(null);
 const currentSessionId = ref(localStorage.getItem(SESSION_STORAGE_KEY) || null);
 const activeView = ref("chat");
+const currentUser = ref(loadStoredUser());
+const localToken = ref(localStorage.getItem(TOKEN_STORAGE_KEY) || "");
 const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
 
-const canSend = computed(() => draft.value.trim().length > 0 && !isStreaming.value);
+const isAdmin = computed(() => currentUser.value?.role === "admin");
+const roleLabel = computed(() => (isAdmin.value ? "管理员 admin" : "工程师用户 engineer"));
+const canSend = computed(() => Boolean(currentUser.value) && draft.value.trim().length > 0 && !isStreaming.value);
 const latestAssistant = computed(() => [...messages.value].reverse().find((m) => m.role === "assistant"));
 const selectedLog = computed(() => adminLogs.value.find((item) => item.id === selectedLogId.value) || adminLogs.value[0] || null);
+const visibleLogs = computed(() => {
+  if (isAdmin.value) {
+    return adminLogs.value;
+  }
+  return adminLogs.value.filter((item) => item.userId === currentUser.value?.user_id);
+});
 const adminStats = computed(() => {
-  const total = adminLogs.value.length;
-  const success = adminLogs.value.filter((item) => item.status === "done").length;
-  const error = adminLogs.value.filter((item) => item.status === "error").length;
+  const total = visibleLogs.value.length;
+  const success = visibleLogs.value.filter((item) => item.status === "done").length;
+  const error = visibleLogs.value.filter((item) => item.status === "error").length;
   const avgDuration = total
-    ? Math.round(adminLogs.value.reduce((sum, item) => sum + item.durationMs, 0) / total)
+    ? Math.round(visibleLogs.value.reduce((sum, item) => sum + item.durationMs, 0) / total)
     : 0;
   return { total, success, error, avgDuration };
 });
 
 function createId() {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem(USER_STORAGE_KEY) || "null");
+  } catch {
+    return null;
+  }
 }
 
 function loadAdminLogs() {
@@ -94,7 +128,23 @@ function loadAdminLogs() {
 }
 
 function persistAdminLogs() {
-  localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(adminLogs.value.slice(0, 50)));
+  localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(adminLogs.value.slice(0, 100)));
+}
+
+function persistAuth(token, user) {
+  localToken.value = token;
+  currentUser.value = user;
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+function clearAuth() {
+  localToken.value = "";
+  currentUser.value = null;
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(USER_STORAGE_KEY);
+  resetConversation();
+  activeView.value = "chat";
 }
 
 function setCurrentSession(sessionId) {
@@ -131,8 +181,34 @@ async function refreshHealth() {
   }
 }
 
+async function restoreAuth() {
+  if (!localToken.value) {
+    return;
+  }
+  try {
+    const user = await getMe(localToken.value);
+    persistAuth(localToken.value, user);
+  } catch {
+    clearAuth();
+  }
+}
+
+async function handleLogin() {
+  loginError.value = "";
+  isLoggingIn.value = true;
+  try {
+    const result = await login(loginForm.value.username.trim(), loginForm.value.password);
+    persistAuth(result.token, result.user);
+    activeView.value = "chat";
+  } catch (error) {
+    loginError.value = error.message || "登录失败";
+  } finally {
+    isLoggingIn.value = false;
+  }
+}
+
 function applyExample(text) {
-  if (isStreaming.value) {
+  if (isStreaming.value || !currentUser.value) {
     return;
   }
   activeView.value = "chat";
@@ -143,19 +219,29 @@ function inferRoute(assistant) {
   if (assistant.chart) {
     return "sql";
   }
-  if (assistant.events?.some((event) => event.name !== "tool")) {
-    return "general";
-  }
   if (assistant.citations?.length) {
     return "qa";
   }
+  if (assistant.events?.length) {
+    return "general";
+  }
   return "supervisor";
+}
+
+function previewText(text, max = 180) {
+  const normalized = (text || "").replace(/\s+/g, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized;
 }
 
 function saveAdminTurn(question, assistant, startedAt, status) {
   const item = {
     id: createId(),
+    userId: currentUser.value?.user_id || "default",
+    username: currentUser.value?.username || "unknown",
+    role: currentUser.value?.role || "engineer",
     question,
+    questionSummary: previewText(question, 120),
+    answerPreview: previewText(assistant.content, 240),
     answer: assistant.content || "",
     status,
     route: inferRoute(assistant),
@@ -169,7 +255,7 @@ function saveAdminTurn(question, assistant, startedAt, status) {
     chart: assistant.chart,
     events: assistant.events || [],
   };
-  adminLogs.value = [item, ...adminLogs.value].slice(0, 50);
+  adminLogs.value = [item, ...adminLogs.value].slice(0, 100);
   selectedLogId.value = item.id;
   persistAdminLogs();
 }
@@ -201,20 +287,39 @@ function routeLabel(route) {
 }
 
 function exportAdminLogs() {
-  const blob = new Blob([JSON.stringify(adminLogs.value, null, 2)], {
+  const payload = visibleLogs.value.map((item) => ({
+    id: item.id,
+    userId: item.userId,
+    username: item.username,
+    role: item.role,
+    questionSummary: item.questionSummary,
+    answerPreview: item.answerPreview,
+    route: item.route,
+    status: item.status,
+    durationMs: item.durationMs,
+    sessionId: item.sessionId,
+    eventCount: item.eventCount,
+    citationCount: item.citationCount,
+    createdAt: item.createdAt,
+  }));
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `petrochat-conversations-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `petrochat-admin-logs-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
 }
 
 function clearAdminLogs() {
-  adminLogs.value = [];
-  selectedLogId.value = null;
+  if (isAdmin.value) {
+    adminLogs.value = [];
+  } else {
+    adminLogs.value = adminLogs.value.filter((item) => item.userId !== currentUser.value?.user_id);
+  }
+  selectedLogId.value = visibleLogs.value[0]?.id || null;
   persistAdminLogs();
 }
 
@@ -235,7 +340,7 @@ function appendToolEvent(kind, data) {
 
 async function sendQuestion() {
   const question = draft.value.trim();
-  if (!question || isStreaming.value) {
+  if (!question || isStreaming.value || !currentUser.value) {
     return;
   }
 
@@ -298,11 +403,14 @@ async function sendQuestion() {
         },
       },
       controller.signal,
-      { sessionId: currentSessionId.value },
+      { sessionId: currentSessionId.value, userId: currentUser.value.user_id },
     );
 
     if (!assistant.content.trim()) {
-      const fallback = await sendChat(question, controller.signal, { sessionId: currentSessionId.value });
+      const fallback = await sendChat(question, controller.signal, {
+        sessionId: currentSessionId.value,
+        userId: currentUser.value.user_id,
+      });
       setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";
       assistant.citations = assistant.citations.length ? assistant.citations : fallback.citations || [];
@@ -332,13 +440,13 @@ function resetConversation() {
   setCurrentSession(null);
 }
 
-onMounted(() => {
-  refreshHealth();
+onMounted(async () => {
+  await Promise.all([refreshHealth(), restoreAuth()]);
 });
 </script>
 
 <template>
-  <main class="shell">
+  <main class="shell" :class="{ locked: !currentUser }">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">
@@ -346,7 +454,7 @@ onMounted(() => {
         </div>
         <div>
           <h1>PetroChat-Agent</h1>
-          <p>v1.0 multiagent</p>
+          <p>v1.1 memory + RBAC</p>
         </div>
       </div>
 
@@ -358,18 +466,29 @@ onMounted(() => {
         </button>
       </div>
 
-      <nav class="view-switch" aria-label="工作区切换">
-        <button
-          type="button"
-          :class="{ active: activeView === 'chat' }"
-          @click="activeView = 'chat'"
-        >
+      <section v-if="currentUser" class="identity-panel">
+        <div class="identity-avatar">
+          <ShieldCheck v-if="isAdmin" :size="18" />
+          <User v-else :size="18" />
+        </div>
+        <div>
+          <strong>{{ currentUser.username }}</strong>
+          <span>{{ roleLabel }}</span>
+        </div>
+        <button class="icon-button" title="退出登录" @click="clearAuth">
+          <LogOut :size="16" />
+        </button>
+      </section>
+
+      <nav v-if="currentUser" class="view-switch" aria-label="工作区切换">
+        <button type="button" :class="{ active: activeView === 'chat' }" @click="activeView = 'chat'">
           <MessageSquareText :size="16" />
           对话
         </button>
         <button
           type="button"
           :class="{ active: activeView === 'admin' }"
+          :disabled="!isAdmin"
           @click="activeView = 'admin'"
         >
           <ClipboardList :size="16" />
@@ -377,7 +496,7 @@ onMounted(() => {
         </button>
       </nav>
 
-      <section class="side-section">
+      <section v-if="currentUser" class="side-section">
         <h2>样例</h2>
         <button
           v-for="item in examples"
@@ -394,7 +513,7 @@ onMounted(() => {
         </button>
       </section>
 
-      <section class="side-section compact">
+      <section v-if="currentUser" class="side-section compact">
         <h2>节点</h2>
         <div class="node-list">
           <span><Server :size="15" /> supervisor</span>
@@ -405,7 +524,37 @@ onMounted(() => {
       </section>
     </aside>
 
-    <section class="workspace">
+    <section v-if="!currentUser" class="login-workspace">
+      <form class="login-panel" @submit.prevent="handleLogin">
+        <div class="login-heading">
+          <Lock :size="28" />
+          <div>
+            <h2>登录 PetroChat-Agent</h2>
+            <p>admin / engineer</p>
+          </div>
+        </div>
+
+        <label>
+          <span>账号</span>
+          <input v-model="loginForm.username" autocomplete="username" maxlength="255" />
+        </label>
+
+        <label>
+          <span>密码</span>
+          <input v-model="loginForm.password" autocomplete="current-password" maxlength="255" type="password" />
+        </label>
+
+        <p v-if="loginError" class="login-error">{{ loginError }}</p>
+
+        <button class="login-button" type="submit" :disabled="isLoggingIn">
+          <Loader2 v-if="isLoggingIn" :size="17" class="spin" />
+          <KeyRound v-else :size="17" />
+          登录
+        </button>
+      </form>
+    </section>
+
+    <section v-else class="workspace">
       <header v-if="activeView === 'chat'" class="topbar">
         <div>
           <h2>多 Agent 对话工作台</h2>
@@ -422,15 +571,10 @@ onMounted(() => {
         <div v-if="messages.length === 0" class="empty-state">
           <Activity :size="38" />
           <h3>开始一次石化领域问答</h3>
-          <p>选择左侧样例，或直接输入规范、事务、统计、换算相关问题。</p>
+          <p>规范、事务、报表和工具调用会由 Supervisor 自动分流。</p>
         </div>
 
-        <article
-          v-for="message in messages"
-          :key="message.id"
-          class="message"
-          :class="message.role"
-        >
+        <article v-for="message in messages" :key="message.id" class="message" :class="message.role">
           <div class="avatar">
             <User v-if="message.role === 'user'" :size="18" />
             <Bot v-else :size="18" />
@@ -438,7 +582,7 @@ onMounted(() => {
 
           <div class="message-main">
             <div class="message-meta">
-              <span>{{ message.role === "user" ? "你" : "PetroChat" }}</span>
+              <span>{{ message.role === "user" ? currentUser.username : "PetroChat" }}</span>
               <span v-if="message.status === 'streaming'" class="inline-status">
                 <Loader2 :size="14" class="spin" />
                 生成中
@@ -446,11 +590,7 @@ onMounted(() => {
               <span v-if="message.status === 'error'" class="error-label">错误</span>
             </div>
 
-            <div
-              v-if="message.role === 'assistant'"
-              class="markdown-body"
-              v-html="renderMarkdown(message.content)"
-            ></div>
+            <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.content)"></div>
             <p v-else class="plain-text">{{ message.content }}</p>
 
             <div v-if="message.events?.length" class="tool-events">
@@ -489,13 +629,7 @@ onMounted(() => {
         ></textarea>
         <div class="composer-actions">
           <span>{{ draft.length }}/2000</span>
-          <button
-            v-if="isStreaming"
-            class="stop-button"
-            type="button"
-            title="停止生成"
-            @click="stopStreaming"
-          >
+          <button v-if="isStreaming" class="stop-button" type="button" title="停止生成" @click="stopStreaming">
             <CircleStop :size="17" />
             停止
           </button>
@@ -509,15 +643,15 @@ onMounted(() => {
       <template v-else>
         <header class="topbar">
           <div>
-            <h2>管理员会话观测台</h2>
-            <p>本地记录最近 50 轮问答，展示路由、耗时、工具、引用和图表侧信道。</p>
+            <h2>管理员工作台</h2>
+            <p>用户权限、Agent 调用、工具事件、检索引用和报表侧信道。</p>
           </div>
           <div class="admin-actions">
-            <button class="secondary-button" type="button" :disabled="!adminLogs.length" @click="exportAdminLogs">
+            <button class="secondary-button" type="button" :disabled="!visibleLogs.length" @click="exportAdminLogs">
               <Download :size="16" />
               导出
             </button>
-            <button class="danger-button" type="button" :disabled="!adminLogs.length" @click="clearAdminLogs">
+            <button class="danger-button" type="button" :disabled="!visibleLogs.length" @click="clearAdminLogs">
               <Trash2 :size="16" />
               清空
             </button>
@@ -525,6 +659,13 @@ onMounted(() => {
         </header>
 
         <div class="admin-body">
+          <section class="admin-card-grid">
+            <div v-for="card in adminCards" :key="card.label" class="admin-card">
+              <span>{{ card.label }}</span>
+              <strong>{{ card.value }}</strong>
+            </div>
+          </section>
+
           <section class="metric-grid">
             <div class="metric-item">
               <span>总轮次</span>
@@ -547,12 +688,12 @@ onMounted(() => {
           <section class="admin-content">
             <div class="log-list">
               <div class="panel-heading">
-                <h3>会话轮次</h3>
-                <span>{{ adminLogs.length }} 条</span>
+                <h3>问答记录</h3>
+                <span>{{ visibleLogs.length }} 条</span>
               </div>
 
               <button
-                v-for="item in adminLogs"
+                v-for="item in visibleLogs"
                 :key="item.id"
                 class="log-row"
                 :class="{ active: selectedLog?.id === item.id }"
@@ -563,17 +704,17 @@ onMounted(() => {
                   <strong>{{ routeLabel(item.route) }}</strong>
                   <small>{{ formatTime(item.createdAt) }}</small>
                 </span>
-                <span class="log-question">{{ item.question }}</span>
+                <span class="log-question">{{ item.questionSummary }}</span>
                 <span class="log-row-bottom">
                   <small :class="['status-pill', item.status]">{{ item.status === "done" ? "完成" : "异常" }}</small>
+                  <small>{{ item.username }}</small>
                   <small>{{ formatDuration(item.durationMs) }}</small>
-                  <small>{{ item.eventCount }} 工具事件</small>
                 </span>
               </button>
 
-              <div v-if="!adminLogs.length" class="admin-empty">
+              <div v-if="!visibleLogs.length" class="admin-empty">
                 <ClipboardList :size="34" />
-                <p>还没有会话记录。</p>
+                <p>暂无问答记录。</p>
               </div>
             </div>
 
@@ -598,8 +739,8 @@ onMounted(() => {
                     <dd>{{ selectedLog.citationCount }}</dd>
                   </div>
                   <div>
-                    <dt>图表</dt>
-                    <dd>{{ selectedLog.chart ? selectedLog.chart.kind : "无" }}</dd>
+                    <dt>工具事件</dt>
+                    <dd>{{ selectedLog.eventCount }}</dd>
                   </div>
                 </dl>
 
@@ -609,7 +750,7 @@ onMounted(() => {
                 </section>
 
                 <section class="detail-section">
-                  <h4>Agent 答案</h4>
+                  <h4>Agent 回答</h4>
                   <div class="markdown-body" v-html="renderMarkdown(selectedLog.answer)"></div>
                 </section>
 

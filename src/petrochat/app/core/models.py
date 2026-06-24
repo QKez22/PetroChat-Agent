@@ -113,3 +113,33 @@ class SessionDetail(BaseModel):
 
     session: SessionSummary
     messages: list[ChatMessageRecord]
+
+
+class LoginRequest(BaseModel):
+    """登录请求。
+
+    当前阶段按项目约束先使用明文密码，并由前端保存本地 token。
+    """
+
+    username: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=255)
+
+
+class AuthUser(BaseModel):
+    """登录后的用户与角色信息。"""
+
+    user_id: str
+    username: str
+    role: Literal["admin", "engineer"]
+    authority_flag: int
+    permissions: list[str] = Field(default_factory=list)
+
+
+class LoginResponse(BaseModel):
+    """登录响应。
+
+    token 是前端本地演示 token，不作为生产级鉴权凭据。
+    """
+
+    token: str
+    user: AuthUser

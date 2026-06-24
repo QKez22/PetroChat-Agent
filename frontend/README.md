@@ -1,21 +1,14 @@
-pnpm dev# PetroChat-Agent Frontend
+# PetroChat-Agent 前端启动说明
 
-Vue3 + Vite 前端工作台，包含两个视图：
+这是 PetroChat-Agent 的 Vue3 + Vite 前端工作台，当前包含：
 
-- 对话：消费后端 `POST /api/chat/stream` SSE 流，渲染 Markdown、工具调用、引用和报表图。
-- 管理员：查看浏览器本地记录的最近 50 轮问答，包括路由、耗时、状态、工具事件和图表信息。
+- 登录页：使用后端 `/api/auth/login`，前端 localStorage 保存本地演示 token。
+- 工程师对话台：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和图表。
+- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时和导出能力。
 
-对话页会把后端返回的 `session_id` 保存在浏览器 `localStorage` 中；同一会话内继续提问时，后端会加载最近 N 轮消息作为短期滑动窗口。点击“新会话”会清空当前 `session_id`，下一次提问会创建新会话。
+## 1. 版本要求
 
-## 运行环境
-
-前端使用 Vite 7，需要 Node.js 版本满足：
-
-```text
-Node.js >= 20.19 或 >= 22.12
-```
-
-推荐版本：
+Vite 7 需要较新的 Node.js。推荐使用：
 
 ```powershell
 node -v
@@ -24,54 +17,37 @@ node -v
 pnpm -v
 ```
 
-如果 `pnpm` 不可用，先启用或安装：
+如果 `pnpm` 不可用：
 
 ```powershell
 corepack enable
 corepack prepare pnpm@latest --activate
-
-# 如果 corepack 不可用，再使用 npm 安装
-npm install -g pnpm --force
 ```
 
-## 启动后端
+如果你之前用 `npm install -g pnpm` 遇到 `EEXIST pnpx`，可以优先使用 `corepack`，不要强行混用 npm 安装依赖。
 
-前端默认通过 Vite 代理访问后端：
+## 2. 启动后端
 
-```text
-http://127.0.0.1:8000
-```
-
-这里故意使用 `127.0.0.1`，避免 Windows/Node.js 把 `localhost` 解析到 IPv6 `::1` 后出现 `ECONNREFUSED ::1:8000`。
-
-在项目根目录启动后端：
+在项目根目录执行：
 
 ```powershell
 cd D:\Project\pythonProject\PetroChat-Agent
 
-# 安装 Python 依赖
 uv sync
-
-# 启动 Chroma
 docker compose up -d chroma
-
-# 首次运行需要把规范文档入库
 uv run python scripts/ingest.py
-
-# 启动 FastAPI
-uv run uvicorn petrochat.main:app --reload --port 8000
+uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-后端启动后可打开：
+后端文档地址：
 
 ```text
-http://localhost:8000/docs
 http://127.0.0.1:8000/docs
 ```
 
-如果要使用 NL2SQL，需要 `.env` 中配置 DeepSeek、DashScope、MySQL 只读账号等环境变量。
+如果需要 NL2SQL，请确认 `.env` 中已经配置 DeepSeek、DashScope 和 MySQL 只读账号。
 
-## 启动前端
+## 3. 启动前端
 
 在 `frontend` 目录执行：
 
@@ -88,64 +64,112 @@ pnpm dev
 http://localhost:5173
 ```
 
-开发服务固定使用 `5173` 端口，并启用了 `strictPort`。如果看到 Vite 自动打开 `5174`、`5175` 等端口，说明旧的前端进程还在占用端口，请先停掉旧进程后重新执行 `pnpm dev`。
+Vite 代理已固定转发到：
 
-## IDEA 中运行
+```text
+http://127.0.0.1:8000
+```
+
+这里不用 `localhost` 作为代理目标，是为了避免 Windows/Node.js 把 `localhost` 解析到 IPv6 `::1` 后出现 `ECONNREFUSED ::1:8000`。
+
+## 4. 登录账号
+
+后端会优先读取 MySQL 的 `user` 表：
+
+| 字段 | 含义 |
+| --- | --- |
+| `user_id` | 用户主键 |
+| `username` | 账号名 |
+| `password` | 明文密码，当前阶段暂按明文比对 |
+| `authority_flag` | `1=admin`，`0=engineer` |
+
+如果本地开发环境无法连接 MySQL，非生产环境会提供两个演示账号：
+
+| 账号 | 密码 | 角色 |
+| --- | --- | --- |
+| `admin` | `admin` | 管理员 |
+| `engineer` | `engineer` | 工程师用户 |
+
+当前 token 只保存在前端 localStorage，用于本地演示登录态，不是生产级鉴权方案。
+
+## 5. IDEA 中运行
 
 1. 打开项目根目录 `D:\Project\pythonProject\PetroChat-Agent`。
-2. 在 `Settings > Languages & Frameworks > Node.js` 中选择 Node.js 22.12.0 或更高版本。
+2. 在 IDEA 的 Node.js 设置中选择 Node.js `v22.12.0` 或更高。
 3. Package manager 选择 `pnpm`。
 4. 打开 `frontend/package.json`。
 5. 点击 `scripts.dev` 左侧运行按钮。
+6. 浏览器打开 `http://localhost:5173`。
 
-## 常用命令
+## 6. 常用命令
 
 ```powershell
-# 开发服务
+# 前端开发服务
 pnpm dev
 
-# 生产构建检查
+# 前端生产构建检查
 pnpm build
 
 # 本地预览构建产物
 pnpm preview
 ```
 
-## 常见问题
+## 7. 常见问题
 
-### npm install 报错
+### 7.1 端口 5173 被占用
 
-本项目已经使用 `pnpm-lock.yaml` 锁定依赖，建议不要混用 `npm install`。如果误用了 npm，可清理后重新安装：
-
-```powershell
-cd D:\Project\pythonProject\PetroChat-Agent\frontend
-
-if (Test-Path package-lock.json) { Remove-Item package-lock.json }
-if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }
-
-pnpm install
-```
-
-### 前端页面能打开，但显示 API 离线
-
-说明 Vite 前端已启动，但 FastAPI 后端没有启动或不是 `8000` 端口。请先运行：
-
-```powershell
-cd D:\Project\pythonProject\PetroChat-Agent
-uv run uvicorn petrochat.main:app --reload --port 8000
-```
-
-### 端口 5173 被占用
-
-先查看并停止占用进程：
+查看占用进程：
 
 ```powershell
 Get-NetTCPConnection -LocalPort 5173 | Select-Object LocalAddress,LocalPort,State,OwningProcess
+```
+
+停止进程：
+
+```powershell
 Stop-Process -Id <OwningProcess> -Force
 ```
 
-不建议随意换端口，因为 README 和 Vite 代理默认都按 `5173 -> 8000` 的本地开发链路说明。确实需要临时换端口时，可以显式指定：
+### 7.2 页面能打开，但显示 API 离线
+
+先确认后端是否运行：
 
 ```powershell
-pnpm dev -- --port 5174 --strictPort
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+如果失败，重新启动后端：
+
+```powershell
+cd D:\Project\pythonProject\PetroChat-Agent
+uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 7.3 前端请求返回 HTTP 500
+
+这通常说明 FastAPI 后端内部报错，不是前端端口问题。请查看后端终端日志，重点检查：
+
+- DeepSeek / DashScope API Key 是否配置。
+- Chroma 是否已启动并完成入库。
+- MySQL 是否可连接。
+- 当前问题是否触发了 NL2SQL 分支但数据库不可用。
+
+## 8. Git 提交命令
+
+本次前端与登录/RBAC 基础能力建议单独提交：
+
+```powershell
+git add src/petrochat/app/api/auth.py `
+        src/petrochat/app/api/__init__.py `
+        src/petrochat/app/core/models.py `
+        tests/test_api.py `
+        frontend/src/App.vue `
+        frontend/src/services/chatStream.js `
+        frontend/src/styles.css `
+        frontend/README.md `
+        README.md `
+        docs
+
+git commit -m "feat: 增加前端登录与管理员工作台"
+git push origin main
 ```

@@ -29,6 +29,28 @@ function parseSseBlock(block) {
   return { event, data };
 }
 
+async function readJson(response) {
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.detail || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+export async function login(username, password) {
+  const response = await fetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  return readJson(response);
+}
+
+export async function getMe(token) {
+  const response = await fetch(`${API_BASE}/api/auth/me?token=${encodeURIComponent(token)}`);
+  return readJson(response);
+}
+
 export async function checkHealth() {
   const response = await fetch(`${API_BASE}/health`);
   if (!response.ok) {
@@ -90,9 +112,7 @@ export async function streamChat(question, handlers, signal, options = {}) {
 export async function sendChat(question, signal, options = {}) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       question,
       session_id: options.sessionId || null,
@@ -101,9 +121,5 @@ export async function sendChat(question, signal, options = {}) {
     signal,
   });
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(detail || `HTTP ${response.status}`);
-  }
-  return response.json();
+  return readJson(response);
 }

@@ -1,5 +1,12 @@
-"""API 层：FastAPI 路由、SSE 流式推送、请求校验。"""
+"""API 层：认证、问答路由与 SSE 流式输出。"""
 
-from .routes import router
+from fastapi import APIRouter
+
+from .auth import router as auth_router
+from .routes import router as chat_router
+
+router = APIRouter()
+router.include_router(auth_router)
+router.include_router(chat_router)
 
 __all__ = ["router"]
