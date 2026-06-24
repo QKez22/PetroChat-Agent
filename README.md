@@ -205,7 +205,7 @@ uv run uvicorn petrochat.main:app --reload --port 8000
 
 ### 6. 启动前端
 
-前端使用 `fetch` 读取 `POST /api/chat/stream` 的 SSE 流，因为浏览器原生 `EventSource` 不支持 POST 请求体。Vite 开发服务会把 `/api`、`/health` 和 `/config` 代理到 `http://localhost:8000`。
+前端使用 `fetch` 读取 `POST /api/chat/stream` 的 SSE 流，因为浏览器原生 `EventSource` 不支持 POST 请求体。Vite 开发服务会把 `/api`、`/health` 和 `/config` 代理到 `http://127.0.0.1:8000`，避免 Windows/Node.js 将 `localhost` 解析到 IPv6 `::1` 导致代理失败。
 
 ```powershell
 cd frontend
@@ -219,6 +219,10 @@ pnpm dev
 
 - 对话：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和报表图。
 - 管理员：用浏览器 `localStorage` 记录最近 50 轮问答，查看路由、耗时、状态、工具调用、引用和图表，并支持 JSON 导出。
+
+## 后续规划
+
+- [v1.1+ 记忆、评估与前端规划](docs/memory-eval-frontend-roadmap.md)：补充短期记忆（滑动窗口）、长期记忆、Recall@K / MRR / NL2SQL 执行准确率等指标，以及前端管理员、记忆管理和评估看板路线图。
 
 ## 常用脚本
 
