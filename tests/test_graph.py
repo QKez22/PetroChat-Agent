@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from petrochat.app.agent import build_graph, build_initial_state
 
@@ -32,3 +32,25 @@ def test_initial_state_shape() -> None:
     assert isinstance(msgs[1], HumanMessage)
     assert msgs[1].content == "hello"
     assert s["question"] == "hello"
+
+
+def test_initial_state_includes_short_term_history() -> None:
+    s = build_initial_state(
+        "继续",
+        session_id="s1",
+        user_id="u1",
+        history=[
+            {"role": "user", "content": "上一问"},
+            {"role": "assistant", "content": "上一答"},
+        ],
+    )
+    msgs = s["messages"]
+    assert len(msgs) == 4
+    assert isinstance(msgs[1], HumanMessage)
+    assert isinstance(msgs[2], AIMessage)
+    assert msgs[1].content == "上一问"
+    assert msgs[2].content == "上一答"
+    assert msgs[3].content == "继续"
+    assert s["session_id"] == "s1"
+    assert s["user_id"] == "u1"
+    assert len(s["short_term_messages"]) == 2

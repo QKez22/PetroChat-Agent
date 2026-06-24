@@ -31,6 +31,11 @@ def test_chat_endpoints_in_openapi() -> None:
     paths = resp.json()["paths"]
     assert "/api/chat" in paths
     assert "/api/chat/stream" in paths
+    assert "/api/sessions" in paths
+    assert "/api/sessions/{session_id}" in paths
     # 都应支持 POST
     assert "post" in paths["/api/chat"]
     assert "post" in paths["/api/chat/stream"]
+    assert "get" in paths["/api/sessions"]
+    assert "get" in paths["/api/sessions/{session_id}"]
+    assert "delete" in paths["/api/sessions/{session_id}"]

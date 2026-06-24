@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from loguru import logger
@@ -61,11 +61,30 @@ def build_graph():
     return builder.compile()
 
 
-def build_initial_state(question: str) -> dict:
+def build_initial_state(
+    question: str,
+    *,
+    session_id: str | None = None,
+    user_id: str = "default",
+    history: list[dict] | None = None,
+) -> dict:
+    history = history or []
+    messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)]
+    for item in history:
+        role = item.get("role")
+        content = item.get("content") or ""
+        if not content:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+    messages.append(HumanMessage(content=question))
     return {
         "question": question,
-        "messages": [
-            SystemMessage(content=AGENT_SYSTEM_PROMPT),
-            HumanMessage(content=question),
-        ],
+        "session_id": session_id or "",
+        "user_id": user_id,
+        "short_term_messages": history,
+        "conversation_summary": "",
+        "messages": messages,
     }

@@ -14,7 +14,11 @@ class AgentState(TypedDict, total=False):
     """LangGraph 节点间共享的状态对象。"""
 
     question: str
+    session_id: str
+    user_id: str
     messages: Annotated[list[BaseMessage], add_messages]
+    short_term_messages: list[dict[str, Any]]
+    conversation_summary: str
     retrieved: list[dict[str, Any]]
     answer: str
     citations: list[str]

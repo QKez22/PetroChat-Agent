@@ -67,6 +67,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/
 data/interim/
+data/runtime/
 
 # 日志
 *.log

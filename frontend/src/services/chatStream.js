@@ -37,14 +37,18 @@ export async function checkHealth() {
   return response.json();
 }
 
-export async function streamChat(question, handlers, signal) {
+export async function streamChat(question, handlers, signal, options = {}) {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({
+      question,
+      session_id: options.sessionId || null,
+      user_id: options.userId || "default",
+    }),
     signal,
   });
 
@@ -83,13 +87,17 @@ export async function streamChat(question, handlers, signal) {
   }
 }
 
-export async function sendChat(question, signal) {
+export async function sendChat(question, signal, options = {}) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({
+      question,
+      session_id: options.sessionId || null,
+      user_id: options.userId || "default",
+    }),
     signal,
   });
 

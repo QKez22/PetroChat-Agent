@@ -54,6 +54,7 @@ const examples = [
 ];
 
 const LOG_STORAGE_KEY = "petrochat.admin.turns";
+const SESSION_STORAGE_KEY = "petrochat.current.session";
 
 const messages = ref([]);
 const draft = ref("");
@@ -62,6 +63,7 @@ const backendStatus = ref("checking");
 const backendMessage = ref("连接中");
 const activeController = ref(null);
 const chatBody = ref(null);
+const currentSessionId = ref(localStorage.getItem(SESSION_STORAGE_KEY) || null);
 const activeView = ref("chat");
 const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
@@ -93,6 +95,15 @@ function loadAdminLogs() {
 
 function persistAdminLogs() {
   localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(adminLogs.value.slice(0, 50)));
+}
+
+function setCurrentSession(sessionId) {
+  currentSessionId.value = sessionId || null;
+  if (currentSessionId.value) {
+    localStorage.setItem(SESSION_STORAGE_KEY, currentSessionId.value);
+  } else {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  }
 }
 
 function renderMarkdown(content) {
@@ -151,6 +162,7 @@ function saveAdminTurn(question, assistant, startedAt, status) {
     durationMs: Date.now() - startedAt,
     createdAt: new Date(startedAt).toISOString(),
     updatedAt: new Date().toISOString(),
+    sessionId: currentSessionId.value,
     eventCount: assistant.events?.length || 0,
     citationCount: assistant.citations?.length || 0,
     citations: assistant.citations || [],
@@ -269,6 +281,9 @@ async function sendQuestion() {
           appendToolEvent("result", data);
         },
         meta(data) {
+          if (data.session_id) {
+            setCurrentSession(data.session_id);
+          }
           assistant.citations = data.citations || [];
           if (data.chart_data_uri) {
             assistant.chart = {
@@ -283,10 +298,12 @@ async function sendQuestion() {
         },
       },
       controller.signal,
+      { sessionId: currentSessionId.value },
     );
 
     if (!assistant.content.trim()) {
-      const fallback = await sendChat(question, controller.signal);
+      const fallback = await sendChat(question, controller.signal, { sessionId: currentSessionId.value });
+      setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";
       assistant.citations = assistant.citations.length ? assistant.citations : fallback.citations || [];
     }
@@ -312,6 +329,7 @@ function resetConversation() {
     stopStreaming();
   }
   messages.value = [];
+  setCurrentSession(null);
 }
 
 onMounted(() => {
@@ -392,6 +410,7 @@ onMounted(() => {
         <div>
           <h2>多 Agent 对话工作台</h2>
           <p>Supervisor 路由 / RAG / NL2SQL / Tool Calling</p>
+          <small v-if="currentSessionId" class="session-hint">Session {{ currentSessionId.slice(0, 8) }}</small>
         </div>
         <button class="secondary-button" type="button" @click="resetConversation">
           <RefreshCw :size="16" />

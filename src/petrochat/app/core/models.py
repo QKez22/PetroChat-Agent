@@ -72,7 +72,8 @@ class ChatRequest(BaseModel):
     """前端 → 后端的对话请求。"""
 
     question: str = Field(min_length=1, max_length=2000)
-    session_id: str | None = Field(default=None, description="多轮会话 ID（暂未使用）")
+    session_id: str | None = Field(default=None, description="多轮会话 ID")
+    user_id: str = Field(default="default", min_length=1, max_length=64)
 
 
 class ChatResponse(BaseModel):
@@ -81,3 +82,34 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[str] = Field(default_factory=list)
     score: ScoreResult | None = None
+    session_id: str | None = None
+
+
+class SessionSummary(BaseModel):
+    """会话列表项。"""
+
+    id: str
+    user_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int = 0
+
+
+class ChatMessageRecord(BaseModel):
+    """持久化后的单条消息。"""
+
+    id: str
+    conversation_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    route: str | None = None
+    latency_ms: int | None = None
+    created_at: str
+
+
+class SessionDetail(BaseModel):
+    """会话详情。"""
+
+    session: SessionSummary
+    messages: list[ChatMessageRecord]
