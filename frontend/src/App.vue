@@ -10,6 +10,7 @@ import {
   Download,
   FileText,
   Gauge,
+  History,
   KeyRound,
   Loader2,
   Lock,
@@ -24,9 +25,18 @@ import {
   User,
   Wrench,
 } from "lucide-vue-next";
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 
-import { checkHealth, getMe, login, sendChat, streamChat } from "./services/chatStream";
+import {
+  checkHealth,
+  deleteSession,
+  getMe,
+  getSession,
+  listSessions,
+  login,
+  sendChat,
+  streamChat,
+} from "./services/chatStream";
 
 const md = new MarkdownIt({
   html: false,
@@ -35,26 +45,10 @@ const md = new MarkdownIt({
 });
 
 const examples = [
-  {
-    icon: FileText,
-    label: "规范问答",
-    text: "什么是 ITPM 策略？",
-  },
-  {
-    icon: Database,
-    label: "事务查询",
-    text: "查询仪表专业的运行中事务清单",
-  },
-  {
-    icon: BarChart3,
-    label: "统计报表",
-    text: "统计各专业的事务数量",
-  },
-  {
-    icon: Gauge,
-    label: "单位换算",
-    text: "1 MPa 等于多少 psi？",
-  },
+  { icon: FileText, label: "规范问答", text: "什么是 ITPM 策略？" },
+  { icon: Database, label: "事务查询", text: "查询仪表专业的运行中事务清单" },
+  { icon: BarChart3, label: "统计报表", text: "统计各专业的事务数量" },
+  { icon: Gauge, label: "单位换算", text: "1 MPa 等于多少 psi？" },
 ];
 
 const adminCards = [
@@ -75,6 +69,8 @@ const loginForm = ref({ username: "admin", password: "admin" });
 const loginError = ref("");
 const isLoggingIn = ref(false);
 const isStreaming = ref(false);
+const isLoadingSessions = ref(false);
+const sessionError = ref("");
 const backendStatus = ref("checking");
 const backendMessage = ref("连接中");
 const activeController = ref(null);
@@ -83,6 +79,7 @@ const currentSessionId = ref(localStorage.getItem(SESSION_STORAGE_KEY) || null);
 const activeView = ref("chat");
 const currentUser = ref(loadStoredUser());
 const localToken = ref(localStorage.getItem(TOKEN_STORAGE_KEY) || "");
+const sessions = ref([]);
 const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
 
@@ -141,6 +138,7 @@ function persistAuth(token, user) {
 function clearAuth() {
   localToken.value = "";
   currentUser.value = null;
+  sessions.value = [];
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
   resetConversation();
@@ -181,6 +179,22 @@ async function refreshHealth() {
   }
 }
 
+async function refreshSessions() {
+  if (!currentUser.value) {
+    sessions.value = [];
+    return;
+  }
+  isLoadingSessions.value = true;
+  sessionError.value = "";
+  try {
+    sessions.value = await listSessions(currentUser.value.user_id, 30);
+  } catch (error) {
+    sessionError.value = error.message || "会话加载失败";
+  } finally {
+    isLoadingSessions.value = false;
+  }
+}
+
 async function restoreAuth() {
   if (!localToken.value) {
     return;
@@ -188,6 +202,7 @@ async function restoreAuth() {
   try {
     const user = await getMe(localToken.value);
     persistAuth(localToken.value, user);
+    await refreshSessions();
   } catch {
     clearAuth();
   }
@@ -200,6 +215,7 @@ async function handleLogin() {
     const result = await login(loginForm.value.username.trim(), loginForm.value.password);
     persistAuth(result.token, result.user);
     activeView.value = "chat";
+    await refreshSessions();
   } catch (error) {
     loginError.value = error.message || "登录失败";
   } finally {
@@ -233,6 +249,11 @@ function previewText(text, max = 180) {
   return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized;
 }
 
+function extractCitations(text) {
+  const matches = text.match(/\[(\d+(?:\.\d+){1,3})\]/g) || [];
+  return [...new Set(matches.map((item) => item.slice(1, -1)))];
+}
+
 function saveAdminTurn(question, assistant, startedAt, status) {
   const item = {
     id: createId(),
@@ -258,6 +279,58 @@ function saveAdminTurn(question, assistant, startedAt, status) {
   adminLogs.value = [item, ...adminLogs.value].slice(0, 100);
   selectedLogId.value = item.id;
   persistAdminLogs();
+}
+
+function toChatMessage(record) {
+  const base = {
+    id: record.id,
+    role: record.role,
+    content: record.content,
+    createdAt: new Date(record.created_at),
+  };
+  if (record.role === "assistant") {
+    return {
+      ...base,
+      events: [],
+      citations: extractCitations(record.content),
+      chart: null,
+      status: "done",
+    };
+  }
+  return base;
+}
+
+async function openSession(sessionId) {
+  if (!currentUser.value || isStreaming.value) {
+    return;
+  }
+  sessionError.value = "";
+  try {
+    const detail = await getSession(sessionId, currentUser.value.user_id);
+    messages.value = detail.messages.map(toChatMessage);
+    setCurrentSession(detail.session.id);
+    activeView.value = "chat";
+    scrollToBottom();
+  } catch (error) {
+    sessionError.value = error.message || "会话打开失败";
+  }
+}
+
+async function removeSession(sessionId) {
+  if (!currentUser.value || isStreaming.value) {
+    return;
+  }
+  sessionError.value = "";
+  try {
+    await deleteSession(sessionId, currentUser.value.user_id);
+    if (currentSessionId.value === sessionId) {
+      messages.value = [];
+      setCurrentSession(null);
+    }
+    await refreshSessions();
+  } catch (error) {
+    sessionError.value = error.message || "会话删除失败";
+  }
 }
 
 function formatTime(value) {
@@ -424,6 +497,7 @@ async function sendQuestion() {
     saveAdminTurn(question, assistant, startedAt, assistant.status);
     isStreaming.value = false;
     activeController.value = null;
+    await refreshSessions();
     scrollToBottom();
   }
 }
@@ -439,6 +513,12 @@ function resetConversation() {
   messages.value = [];
   setCurrentSession(null);
 }
+
+watch(currentUser, (user) => {
+  if (user) {
+    refreshSessions();
+  }
+});
 
 onMounted(async () => {
   await Promise.all([refreshHealth(), restoreAuth()]);
@@ -495,6 +575,38 @@ onMounted(async () => {
           管理员
         </button>
       </nav>
+
+      <section v-if="currentUser" class="side-section">
+        <div class="section-heading">
+          <h2>历史会话</h2>
+          <button class="tiny-button" type="button" title="刷新会话" @click="refreshSessions">
+            <RefreshCw :size="14" :class="{ spin: isLoadingSessions }" />
+          </button>
+        </div>
+        <div class="session-list">
+          <div
+            v-for="item in sessions"
+            :key="item.id"
+            class="session-row"
+            :class="{ active: currentSessionId === item.id }"
+            role="button"
+            tabindex="0"
+            @click="openSession(item.id)"
+            @keydown.enter.prevent="openSession(item.id)"
+          >
+            <History :size="15" />
+            <span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.message_count }} 条 / {{ formatTime(item.updated_at) }}</small>
+            </span>
+            <button class="delete-mini" type="button" title="删除会话" @click.stop="removeSession(item.id)">
+              <Trash2 :size="14" />
+            </button>
+          </div>
+          <p v-if="sessionError" class="side-error">{{ sessionError }}</p>
+          <p v-else-if="!isLoadingSessions && !sessions.length" class="side-muted">暂无历史会话</p>
+        </div>
+      </section>
 
       <section v-if="currentUser" class="side-section">
         <h2>样例</h2>

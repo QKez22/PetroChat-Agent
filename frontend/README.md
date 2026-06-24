@@ -4,6 +4,7 @@
 
 - 登录页：使用后端 `/api/auth/login`，前端 localStorage 保存本地演示 token。
 - 工程师对话台：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和图表。
+- 历史会话：左侧栏调用 `/api/sessions`，支持恢复和删除当前用户会话。
 - 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时和导出能力。
 
 ## 1. 版本要求
@@ -156,20 +157,19 @@ uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 
 ## 8. Git 提交命令
 
-本次前端与登录/RBAC 基础能力建议单独提交：
+提交信息需要带明确阶段序号。本轮会话历史闭环建议使用：
 
 ```powershell
-git add src/petrochat/app/api/auth.py `
-        src/petrochat/app/api/__init__.py `
-        src/petrochat/app/core/models.py `
+git add src/petrochat/app/api/routes.py `
         tests/test_api.py `
         frontend/src/App.vue `
         frontend/src/services/chatStream.js `
         frontend/src/styles.css `
         frontend/README.md `
         README.md `
-        docs
+        docs/1.2-用户需求文档.md `
+        docs/1.4-工具与API接口文档.md
 
-git commit -m "feat: 增加前端登录与管理员工作台"
+git commit -m "feat(phase-5.2): 接入前端会话历史"
 git push origin main
 ```

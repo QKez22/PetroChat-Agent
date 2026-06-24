@@ -242,8 +242,13 @@ async def get_session(session_id: str, user_id: str = "default") -> SessionDetai
 
 
 @router.delete("/sessions/{session_id}", summary="删除会话")
-async def delete_session(session_id: str) -> dict[str, bool]:
-    deleted = get_conversation_store().delete_session(session_id)
+async def delete_session(session_id: str, user_id: str | None = None) -> dict[str, bool]:
+    store = get_conversation_store()
+    if user_id:
+        sessions = [row for row in store.list_sessions(user_id=user_id, limit=500) if row["id"] == session_id]
+        if not sessions:
+            raise HTTPException(status_code=404, detail="session not found")
+    deleted = store.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="session not found")
     return {"deleted": True}

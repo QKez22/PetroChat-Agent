@@ -209,11 +209,105 @@ button {
   gap: 10px;
 }
 
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .side-section h2 {
   margin: 0;
   color: #59656d;
   font-size: 13px;
   font-weight: 700;
+}
+
+.tiny-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #415058;
+  background: #eef4f3;
+  cursor: pointer;
+}
+
+.session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 54px;
+  padding: 9px 8px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  color: #1f2a31;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-row.active {
+  border-color: #176b61;
+  background: #f3fbf8;
+  box-shadow: 0 0 0 3px rgba(23, 107, 97, 0.1);
+}
+
+.session-row > span {
+  min-width: 0;
+}
+
+.session-row strong,
+.session-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row strong {
+  color: #1d252c;
+  font-size: 13px;
+}
+
+.session-row small {
+  margin-top: 3px;
+  color: #66737d;
+  font-size: 12px;
+}
+
+.delete-mini {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #7b4b45;
+  background: #f6e9e6;
+  cursor: pointer;
+}
+
+.side-muted,
+.side-error {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.side-muted {
+  color: #66737d;
+}
+
+.side-error {
+  color: #bd3f32;
 }
 
 .example-button {

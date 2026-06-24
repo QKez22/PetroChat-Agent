@@ -123,3 +123,30 @@ export async function sendChat(question, signal, options = {}) {
 
   return readJson(response);
 }
+
+export async function listSessions(userId, limit = 30) {
+  const params = new URLSearchParams({
+    user_id: userId || "default",
+    limit: String(limit),
+  });
+  const response = await fetch(`${API_BASE}/api/sessions?${params.toString()}`);
+  return readJson(response);
+}
+
+export async function getSession(sessionId, userId) {
+  const params = new URLSearchParams({
+    user_id: userId || "default",
+  });
+  const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params.toString()}`);
+  return readJson(response);
+}
+
+export async function deleteSession(sessionId, userId) {
+  const params = new URLSearchParams({
+    user_id: userId || "default",
+  });
+  const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params.toString()}`, {
+    method: "DELETE",
+  });
+  return readJson(response);
+}
