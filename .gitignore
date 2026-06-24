@@ -69,6 +69,7 @@ data/processed/
 data/interim/
 data/runtime/
 data/ducuments/
+data/eval_results/
 
 # 日志
 *.log
