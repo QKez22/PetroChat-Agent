@@ -301,6 +301,10 @@ def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:
             "rag_contract": {"evidence_count": 4},
             "prediction_metrics": {
                 "prediction_count": 8,
+                "success_rate": 0.875,
+                "error_count": 1,
+                "avg_latency_ms": 1234.5,
+                "max_latency_ms": 3000,
                 "sql_validation_rate": 1.0,
                 "sql_table_recall": 0.75,
                 "sql_filter_value_recall": 0.5,
@@ -318,7 +322,9 @@ def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:
     data = resp.json()
     assert data["dataset"]["dialogues"] == 2
     assert data["contractMetrics"][0]["value"] == "100%"
-    assert data["predictionMetrics"][2]["value"] == "75%"
+    prediction_by_label = {item["label"]: item for item in data["predictionMetrics"]}
+    assert prediction_by_label["Agent 成功率"]["value"] == "88%"
+    assert prediction_by_label["SQL 表召回"]["value"] == "75%"
     assert data["scenarioCounts"] == [{"label": "nl2sql_condition_memory", "value": 4}]
 
     get_settings.cache_clear()

@@ -39,7 +39,34 @@ def parse_args() -> argparse.Namespace:
         "--limit",
         type=int,
         default=None,
-        help="Maximum number of turns to replay.",
+        help="Maximum number of turns to replay. Agent mode defaults to 5 for safe smoke runs.",
+    )
+    parser.add_argument(
+        "--scenario-type",
+        default=None,
+        help="Only replay turns with this scenario_type.",
+    )
+    parser.add_argument(
+        "--dialogue-id",
+        action="append",
+        default=None,
+        help="Only replay a specific dialogue_id. Can be provided multiple times.",
+    )
+    parser.add_argument(
+        "--eval-user-id",
+        default="0",
+        help="Numeric user_id used for agent replay memory isolation.",
+    )
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Optional run id written to prediction rows and summary.",
+    )
+    parser.add_argument(
+        "--summary-output",
+        type=Path,
+        default=None,
+        help="Optional replay summary JSON path.",
     )
     parser.add_argument(
         "--evaluate",
@@ -56,11 +83,23 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    limit = args.limit
+    if args.mode == "agent" and limit is None:
+        limit = 5
+    summary_output = args.summary_output
+    if summary_output is None and args.mode == "agent":
+        summary_output = args.output.with_suffix(".summary.json")
+
     summary = generate_predictions(
         golden_dir=args.golden_dir,
         output_path=args.output,
         mode=args.mode,
-        limit=args.limit,
+        limit=limit,
+        scenario_type=args.scenario_type,
+        dialogue_ids=set(args.dialogue_id or []),
+        eval_user_id=args.eval_user_id,
+        run_id=args.run_id,
+        summary_path=summary_output,
     )
     if args.evaluate:
         eval_summary = evaluate_golden_set(
@@ -75,9 +114,14 @@ def main() -> None:
         return
 
     print("Golden Set replay complete")
+    print(f"- run_id: {summary['run_id']}")
     print(f"- mode: {summary['mode']}")
     print(f"- predictions: {summary['prediction_count']}")
+    print(f"- success_rate: {summary['prediction_summary']['success_rate']}")
+    print(f"- error_count: {summary['prediction_summary']['error_count']}")
     print(f"- output: {summary['output_path']}")
+    if summary.get("summary_path"):
+        print(f"- summary: {summary['summary_path']}")
     if args.evaluate:
         print(f"- evaluation: {summary['evaluation']}")
 

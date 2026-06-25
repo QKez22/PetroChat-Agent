@@ -207,6 +207,9 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
         return None
 
     predictions = _read_jsonl(prediction_path)
+    ok_count = sum(1 for row in predictions if row.get("status") == "ok")
+    error_count = len(predictions) - ok_count
+    latencies = [int(row.get("latency_ms") or 0) for row in predictions]
     pred_by_key = {
         (str(row.get("dialogue_id")), str(row.get("turn_id"))): row
         for row in predictions
@@ -258,6 +261,11 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
 
     return {
         "prediction_count": len(predictions),
+        "ok_count": ok_count,
+        "error_count": error_count,
+        "success_rate": round(ok_count / (len(predictions) or 1), 4),
+        "avg_latency_ms": round(sum(latencies) / (len(latencies) or 1), 2),
+        "max_latency_ms": max(latencies) if latencies else 0,
         "sql_present_rate": round(sql_present / (len(sql_rows) or 1), 4),
         "sql_validation_rate": round(sql_valid / (sql_present or 1), 4),
         "sql_table_recall": round(sql_table_hits / (len(sql_rows) or 1), 4),
@@ -308,6 +316,9 @@ def _render_markdown(result: dict[str, Any]) -> str:
             "## Prediction Metrics",
             "",
             f"- Prediction count: {prediction['prediction_count']}",
+            f"- Agent success rate: {prediction.get('success_rate', 0)}",
+            f"- Agent error count: {prediction.get('error_count', 0)}",
+            f"- Avg latency ms: {prediction.get('avg_latency_ms', 0)}",
             f"- SQL validation rate: {prediction['sql_validation_rate']}",
             f"- SQL table recall: {prediction['sql_table_recall']}",
             f"- SQL filter value recall: {prediction['sql_filter_value_recall']}",

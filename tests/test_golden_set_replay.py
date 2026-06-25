@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+from langchain_core.messages import AIMessage
+
 from petrochat.app.evaluation import evaluate_golden_set, generate_predictions
 
 
@@ -104,5 +106,50 @@ def test_oracle_replay_writes_predictions_and_evaluates(tmp_path: Path) -> None:
 
     result = evaluate_golden_set(golden, out_dir=tmp_path / "out", prediction_path=output)
     assert result["prediction_metrics"]["prediction_count"] == 1
+    assert result["prediction_metrics"]["success_rate"] == 1
     assert result["prediction_metrics"]["sql_validation_rate"] == 1
     assert result["prediction_metrics"]["sql_table_recall"] == 1
+
+
+def test_agent_replay_uses_runner_and_writes_summary(tmp_path: Path) -> None:
+    golden = _make_minimal_golden(tmp_path)
+    output = tmp_path / "agent_predictions.jsonl"
+    summary_path = tmp_path / "agent_predictions.summary.json"
+
+    async def fake_runner(state: dict) -> dict:
+        assert state["session_id"] == "eval-smoke-d1"
+        assert state["user_id"] == "1"
+        return {
+            **state,
+            "next": "sql",
+            "messages": [
+                *state["messages"],
+                AIMessage(content="**SQL:**\n```sql\nSELECT task_id FROM affair_task LIMIT 20\n```"),
+            ],
+            "long_term_memories": [{"id": "101", "content": "默认炼油一部"}],
+        }
+
+    summary = generate_predictions(
+        golden,
+        output,
+        mode="agent",
+        limit=1,
+        eval_user_id="1",
+        run_id="smoke",
+        summary_path=summary_path,
+        runner=fake_runner,
+    )
+
+    row = json.loads(output.read_text(encoding="utf-8").strip())
+    assert row["mode"] == "agent"
+    assert row["run_id"] == "smoke"
+    assert row["session_id"] == "eval-smoke-d1"
+    assert row["eval_user_id"] == "1"
+    assert row["route"] == "sql"
+    assert row["memory_used"] == ["101"]
+    assert "affair_task" in row["sql"]
+
+    assert summary["prediction_summary"]["success_rate"] == 1
+    assert summary["prediction_summary"]["error_count"] == 0
+    saved_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert saved_summary["run_id"] == "smoke"

@@ -296,6 +296,16 @@ def _to_dashboard_summary(raw: dict[str, Any], source_path: Path) -> dict[str, A
                 "detail": "prediction JSONL",
             },
             {
+                "label": "Agent 成功率",
+                "value": _percent(prediction.get("success_rate")),
+                "detail": f"error={prediction.get('error_count', 0)}",
+            },
+            {
+                "label": "平均延迟",
+                "value": f"{prediction.get('avg_latency_ms', 0)} ms",
+                "detail": f"max={prediction.get('max_latency_ms', 0)} ms",
+            },
+            {
                 "label": "SQL 校验率",
                 "value": _percent(prediction.get("sql_validation_rate")),
                 "detail": "sqlglot AST",
