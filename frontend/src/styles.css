@@ -990,6 +990,7 @@ button {
   color: #b7372f;
 }
 
+.eval-run-section,
 .eval-case-section {
   margin-top: 14px;
   padding-top: 14px;
@@ -1020,6 +1021,89 @@ button {
 .eval-case-header strong {
   flex: 0 0 auto;
   color: #0f766e;
+}
+
+.eval-run-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.eval-run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eval-run-row.active {
+  border-color: #0f766e;
+  box-shadow: inset 3px 0 0 #0f766e;
+}
+
+.eval-run-row span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.eval-run-row strong,
+.eval-run-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-run-row strong {
+  color: #1d252c;
+  font-size: 13px;
+}
+
+.eval-run-row small {
+  color: #66737d;
+  font-size: 12px;
+}
+
+.eval-trace-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.eval-trace-panel div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #eef6f5;
+}
+
+.eval-trace-panel span,
+.eval-trace-panel strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-trace-panel span {
+  color: #66737d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.eval-trace-panel strong {
+  margin-top: 4px;
+  color: #1d252c;
+  font-size: 13px;
 }
 
 .eval-case-grid {
@@ -1369,6 +1453,11 @@ button {
   }
 
   .eval-case-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .eval-run-grid,
+  .eval-trace-panel {
     grid-template-columns: 1fr;
   }
 

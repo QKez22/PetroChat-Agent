@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,28 @@ def _load_eval_file(path: Path) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"invalid evaluation summary: {exc}") from exc
 
 
+def _load_optional_eval_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and "dataset_profile" in data else None
+
+
+def _generated_at(raw: dict[str, Any], source_path: Path) -> str:
+    declared = raw.get("declared_validation_summary") or {}
+    generated_at = str(declared.get("generated_at") or "")
+    if "T" in generated_at:
+        return generated_at.replace("T", " ")[:16]
+    if generated_at:
+        return generated_at[:16]
+    if source_path.exists():
+        return datetime.fromtimestamp(source_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    return "-"
+
+
 def _load_prediction_rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         raise HTTPException(
@@ -71,6 +94,21 @@ def _load_prediction_rows(path: Path) -> list[dict[str, Any]]:
             detail=f"invalid prediction JSONL at line {current_line}: {exc}",
         ) from exc
     return rows
+
+
+def _trace_hint(dialogue_id: str | None = None, turn_id: str | None = None) -> dict[str, Any]:
+    settings = get_settings()
+    session_id = f"eval-{dialogue_id}" if dialogue_id and dialogue_id != "-" else ""
+    query = f"session_id:{session_id}" if session_id else "session_id:eval-*"
+    if turn_id and turn_id != "-":
+        query = f"{query} turn_id:{turn_id}"
+    return {
+        "enabled": settings.langsmith_tracing,
+        "project": settings.langsmith_project,
+        "sessionId": session_id,
+        "query": query,
+        "note": "真实 agent 回放时，可在 LangSmith 中按 session_id / dialogue_id / turn_id 过滤定位。",
+    }
 
 
 def _clip(value: Any, limit: int = 96) -> str:
@@ -180,6 +218,7 @@ def _to_failure_case(row: dict[str, Any]) -> dict[str, Any]:
         "answerSummary": _clip(row.get("answer"), 140),
         "sqlSummary": _sql_summary(str(row.get("sql") or "")),
         "retrievalSummary": _retrieval_summary(row.get("retrieved")),
+        "traceHint": _trace_hint(dialogue_id, turn_id),
         "latencyMs": int(row.get("latency_ms") or 0),
     }
 
@@ -206,15 +245,9 @@ def _to_dashboard_summary(raw: dict[str, Any], source_path: Path) -> dict[str, A
     memory = raw.get("memory_contract") or {}
     rag = raw.get("rag_contract") or {}
     prediction = raw.get("prediction_metrics") or {}
-    declared = raw.get("declared_validation_summary") or {}
-
-    generated_at = str(declared.get("generated_at") or "")
-    if "T" in generated_at:
-        generated_at = generated_at.replace("T", " ")[:16]
-
     return {
         "title": "Golden Set 评估摘要",
-        "generatedAt": generated_at or "-",
+        "generatedAt": _generated_at(raw, source_path),
         "source": str(source_path),
         "note": "仅展示聚合指标；原始 Golden Set 与评估结果文件不提交远程。",
         "dataset": {
@@ -290,6 +323,70 @@ def _to_dashboard_summary(raw: dict[str, Any], source_path: Path) -> dict[str, A
     }
 
 
+def _candidate_summary_paths(summary_path: Path) -> list[Path]:
+    results_dir = summary_path.parent
+    candidates = {summary_path}
+    if results_dir.exists():
+        candidates.update(results_dir.glob("*summary*.json"))
+        candidates.update(results_dir.glob("golden_eval_*.json"))
+    return sorted(candidates, key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+
+
+def _prediction_path_for_run(raw: dict[str, Any], default_path: Path) -> Path:
+    prediction_path = raw.get("prediction_path")
+    if prediction_path:
+        return Path(str(prediction_path))
+    return default_path
+
+
+def _to_run_summary(raw: dict[str, Any], summary_path: Path, prediction_path: Path) -> dict[str, Any]:
+    dataset = raw.get("dataset_profile") or {}
+    prediction = raw.get("prediction_metrics") or {}
+    generated_at = _generated_at(raw, summary_path)
+    run_stamp = int(summary_path.stat().st_mtime) if summary_path.exists() else 0
+    return {
+        "id": f"{summary_path.stem}-{run_stamp}",
+        "label": summary_path.stem,
+        "generatedAt": generated_at,
+        "status": "scored" if prediction else "profile-only",
+        "summaryPath": str(summary_path),
+        "predictionPath": str(prediction_path),
+        "dataset": {
+            "dialogues": dataset.get("dialogue_count", 0),
+            "turns": dataset.get("turn_count", 0),
+        },
+        "metrics": {
+            "predictionCount": prediction.get("prediction_count", 0),
+            "sqlValidationRate": _percent(prediction.get("sql_validation_rate")),
+            "sqlTableRecall": _percent(prediction.get("sql_table_recall")),
+            "ragRecallAt5": _percent(prediction.get("rag_recall_at_5")),
+        },
+        "artifacts": {
+            "summary": summary_path.exists(),
+            "markdown": summary_path.with_suffix(".md").exists(),
+            "predictions": prediction_path.exists(),
+        },
+        "traceHint": _trace_hint(),
+    }
+
+
+def _evaluation_runs(summary_path: Path, prediction_path: Path, limit: int) -> dict[str, Any]:
+    runs: list[dict[str, Any]] = []
+    for path in _candidate_summary_paths(summary_path):
+        raw = _load_optional_eval_file(path)
+        if raw is None:
+            continue
+        runs.append(_to_run_summary(raw, path, _prediction_path_for_run(raw, prediction_path)))
+        if len(runs) >= limit:
+            break
+    return {
+        "title": "评估运行历史",
+        "returnedCount": len(runs),
+        "runs": runs,
+        "note": "历史来自本地评估摘要文件扫描；traceHint 仅提供 LangSmith 查询线索，不包含真实 trace 内容。",
+    }
+
+
 @router.get("/latest", summary="最新 Golden Set 评估摘要")
 async def latest_evaluation() -> dict[str, Any]:
     path = get_settings().eval_results_path
@@ -304,3 +401,11 @@ async def evaluation_failures(
     path = get_settings().eval_predictions_path
     rows = _load_prediction_rows(path)
     return _failure_report(rows, path, limit)
+
+
+@router.get("/runs", summary="Golden Set 评估运行历史")
+async def evaluation_runs(
+    limit: int = Query(default=10, ge=1, le=50),
+) -> dict[str, Any]:
+    settings = get_settings()
+    return _evaluation_runs(settings.eval_results_path, settings.eval_predictions_path, limit)

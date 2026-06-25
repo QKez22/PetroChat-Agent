@@ -51,10 +51,12 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "/api/auth/me" in paths
     assert "/api/evaluation/latest" in paths
     assert "/api/evaluation/failures" in paths
+    assert "/api/evaluation/runs" in paths
     assert "post" in paths["/api/auth/login"]
     assert "get" in paths["/api/auth/me"]
     assert "get" in paths["/api/evaluation/latest"]
     assert "get" in paths["/api/evaluation/failures"]
+    assert "get" in paths["/api/evaluation/runs"]
 
 
 def test_dev_login_returns_local_token(monkeypatch) -> None:
@@ -121,8 +123,54 @@ def test_evaluation_failures_reads_prediction_samples(monkeypatch, tmp_path) -> 
     assert data["failureCount"] == 2
     assert data["cases"][0]["riskLevel"] == "fail"
     assert data["cases"][0]["sqlSummary"]["present"] is False
+    assert data["cases"][0]["traceHint"]["sessionId"] == "eval-d1"
     assert "sql" not in data["cases"][0]
     assert any("SQL" in reason for reason in data["cases"][0]["reasons"])
+
+    get_settings.cache_clear()
+
+
+def test_evaluation_runs_reads_local_summaries(monkeypatch, tmp_path) -> None:
+    from petrochat.app.core.config import get_settings
+
+    summary_path = tmp_path / "golden_eval_summary.json"
+    prediction_path = tmp_path / "predictions.jsonl"
+    summary_path.write_text(
+        json.dumps({
+            "dataset_profile": {
+                "dialogue_count": 5,
+                "turn_count": 12,
+            },
+            "prediction_metrics": {
+                "prediction_count": 12,
+                "sql_validation_rate": 0.8,
+                "sql_table_recall": 0.75,
+                "rag_recall_at_5": 0.5,
+            },
+            "declared_validation_summary": {"generated_at": "2026-06-25T10:00:00"},
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    prediction_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("EVAL_RESULTS_PATH", str(summary_path))
+    monkeypatch.setenv("EVAL_PREDICTIONS_PATH", str(prediction_path))
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "petrochat-test")
+    get_settings.cache_clear()
+
+    resp = client.get("/api/evaluation/runs")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["returnedCount"] == 1
+    run = data["runs"][0]
+    assert run["status"] == "scored"
+    assert run["generatedAt"] == "2026-06-25 10:00"
+    assert run["dataset"] == {"dialogues": 5, "turns": 12}
+    assert run["metrics"]["sqlValidationRate"] == "80%"
+    assert run["artifacts"]["summary"] is True
+    assert run["artifacts"]["predictions"] is True
+    assert run["traceHint"]["enabled"] is True
+    assert run["traceHint"]["project"] == "petrochat-test"
 
     get_settings.cache_clear()
 

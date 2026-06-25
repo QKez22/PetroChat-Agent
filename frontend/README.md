@@ -5,7 +5,7 @@
 - 登录页：使用后端 `/api/auth/login`，前端 localStorage 保存本地演示 token。
 - 工程师对话台：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和图表。
 - 历史会话：左侧栏调用 `/api/sessions`，支持恢复和删除当前用户会话。
-- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要、失败/风险样例和导出能力；评估摘要优先读取后端 `/api/evaluation/latest` 与 `/api/evaluation/failures`，失败时回退静态摘要。
+- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要、评估运行历史、失败/风险样例和导出能力；评估区优先读取后端 `/api/evaluation/latest`、`/api/evaluation/runs` 与 `/api/evaluation/failures`，失败时回退静态摘要。
 
 ## 1. 版本要求
 
@@ -157,7 +157,7 @@ uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 
 ## 8. Git 提交命令
 
-提交信息需要带明确阶段序号。本轮失败样例回放建议使用：
+提交信息需要带明确阶段序号。本轮评估历史和 Trace 对照建议使用：
 
 ```powershell
 git add src/petrochat/app/api/evaluation.py `
@@ -173,6 +173,6 @@ git add src/petrochat/app/api/evaluation.py `
         docs/1.6-评测标准文档.md `
         docs/v1.1-记忆评估与前端规划.md
 
-git commit -m "feat(phase-5.7): 增加评估失败样例回放"
+git commit -m "feat(phase-5.8): 增加评估历史和 Trace 对照"
 git push origin main
 ```

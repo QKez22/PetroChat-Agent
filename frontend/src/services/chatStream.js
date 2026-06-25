@@ -161,3 +161,9 @@ export async function getEvaluationFailures(limit = 8) {
   const response = await fetch(`${API_BASE}/api/evaluation/failures?${params.toString()}`);
   return readJson(response);
 }
+
+export async function getEvaluationRuns(limit = 10) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const response = await fetch(`${API_BASE}/api/evaluation/runs?${params.toString()}`);
+  return readJson(response);
+}

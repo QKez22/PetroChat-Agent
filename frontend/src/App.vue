@@ -31,6 +31,7 @@ import {
   checkHealth,
   deleteSession,
   getEvaluationFailures,
+  getEvaluationRuns,
   getMe,
   getLatestEvaluation,
   getSession,
@@ -90,6 +91,9 @@ const evaluationError = ref("");
 const evaluationCases = ref(fallbackEvaluationSummary.issueCases || []);
 const evaluationCaseError = ref("");
 const selectedEvaluationCaseId = ref(evaluationCases.value[0]?.id || null);
+const evaluationRuns = ref(fallbackEvaluationSummary.runs || []);
+const evaluationRunError = ref("");
+const selectedEvaluationRunId = ref(evaluationRuns.value[0]?.id || null);
 const isLoadingEvaluation = ref(false);
 
 const isAdmin = computed(() => currentUser.value?.role === "admin");
@@ -100,6 +104,11 @@ const selectedLog = computed(() => adminLogs.value.find((item) => item.id === se
 const selectedEvaluationCase = computed(() => (
   evaluationCases.value.find((item) => item.id === selectedEvaluationCaseId.value)
   || evaluationCases.value[0]
+  || null
+));
+const selectedEvaluationRun = computed(() => (
+  evaluationRuns.value.find((item) => item.id === selectedEvaluationRunId.value)
+  || evaluationRuns.value[0]
   || null
 ));
 const visibleLogs = computed(() => {
@@ -215,11 +224,14 @@ async function refreshEvaluation() {
     evaluationError.value = "";
     evaluationCases.value = fallbackEvaluationSummary.issueCases || [];
     evaluationCaseError.value = "";
+    evaluationRuns.value = fallbackEvaluationSummary.runs || [];
+    evaluationRunError.value = "";
     return;
   }
   isLoadingEvaluation.value = true;
   evaluationError.value = "";
   evaluationCaseError.value = "";
+  evaluationRunError.value = "";
   try {
     evaluation.value = await getLatestEvaluation();
   } catch (error) {
@@ -227,6 +239,18 @@ async function refreshEvaluation() {
     evaluationError.value = error.message || "评估摘要加载失败，已使用静态摘要";
   } finally {
     isLoadingEvaluation.value = false;
+  }
+  try {
+    const result = await getEvaluationRuns(10);
+    evaluationRuns.value = result.runs || [];
+    selectedEvaluationRunId.value = evaluationRuns.value[0]?.id || null;
+    if (!evaluationRuns.value.length) {
+      evaluationRunError.value = "当前未发现评估历史运行";
+    }
+  } catch (error) {
+    evaluationRuns.value = fallbackEvaluationSummary.runs || [];
+    selectedEvaluationRunId.value = evaluationRuns.value[0]?.id || null;
+    evaluationRunError.value = error.message || "评估历史加载失败，已使用静态示例";
   }
   try {
     const result = await getEvaluationFailures(8);
@@ -419,6 +443,14 @@ function riskLabel(level) {
     pass: "抽样",
   };
   return labels[level] || level || "未知";
+}
+
+function runStatusLabel(status) {
+  const labels = {
+    scored: "已评分",
+    "profile-only": "仅画像",
+  };
+  return labels[status] || status || "未知";
 }
 
 function exportAdminLogs() {
@@ -869,7 +901,7 @@ onMounted(async () => {
                 <button class="tiny-button" type="button" title="刷新评估摘要" @click="refreshEvaluation">
                   <RefreshCw :size="14" :class="{ spin: isLoadingEvaluation }" />
                 </button>
-                <span class="status-pill done">Phase 5.6</span>
+                <span class="status-pill done">Phase 5.8</span>
               </div>
             </div>
 
@@ -932,6 +964,57 @@ onMounted(async () => {
 
             <p v-if="evaluationError" class="eval-note warning">{{ evaluationError }}</p>
             <p class="eval-note">{{ evaluation.note }}</p>
+
+            <div class="eval-run-section">
+              <div class="eval-case-header">
+                <div>
+                  <h4>评估运行历史</h4>
+                  <span>摘要文件、prediction 产物与 Trace 查询线索</span>
+                </div>
+                <strong>{{ evaluationRuns.length }} 批</strong>
+              </div>
+              <p v-if="evaluationRunError" class="eval-note warning">{{ evaluationRunError }}</p>
+
+              <div v-if="evaluationRuns.length" class="eval-run-grid">
+                <button
+                  v-for="item in evaluationRuns"
+                  :key="item.id"
+                  class="eval-run-row"
+                  :class="{ active: selectedEvaluationRun?.id === item.id }"
+                  type="button"
+                  @click="selectedEvaluationRunId = item.id"
+                >
+                  <span>
+                    <strong>{{ item.label }}</strong>
+                    <small>{{ item.generatedAt }}</small>
+                  </span>
+                  <small class="status-pill done">{{ runStatusLabel(item.status) }}</small>
+                  <span>
+                    <small>{{ item.dataset.dialogues }} 组 / {{ item.dataset.turns }} 轮</small>
+                    <small>SQL {{ item.metrics.sqlValidationRate }} · RAG {{ item.metrics.ragRecallAt5 }}</small>
+                  </span>
+                </button>
+              </div>
+
+              <div v-if="selectedEvaluationRun" class="eval-trace-panel">
+                <div>
+                  <span>产物</span>
+                  <strong>
+                    {{ selectedEvaluationRun.artifacts.summary ? "summary" : "-" }} /
+                    {{ selectedEvaluationRun.artifacts.predictions ? "predictions" : "-" }} /
+                    {{ selectedEvaluationRun.artifacts.markdown ? "markdown" : "-" }}
+                  </strong>
+                </div>
+                <div>
+                  <span>Trace 项目</span>
+                  <strong>{{ selectedEvaluationRun.traceHint.project }}</strong>
+                </div>
+                <div>
+                  <span>查询线索</span>
+                  <strong>{{ selectedEvaluationRun.traceHint.query }}</strong>
+                </div>
+              </div>
+            </div>
 
             <div class="eval-case-section">
               <div class="eval-case-header">
@@ -1002,6 +1085,10 @@ onMounted(async () => {
                         {{ selectedEvaluationCase.retrievalSummary.count }} 条 /
                         {{ selectedEvaluationCase.retrievalSummary.sources.join(", ") || "无来源摘要" }}
                       </dd>
+                    </div>
+                    <div>
+                      <dt>Trace 查询</dt>
+                      <dd>{{ selectedEvaluationCase.traceHint.query }}</dd>
                     </div>
                   </dl>
                 </div>
