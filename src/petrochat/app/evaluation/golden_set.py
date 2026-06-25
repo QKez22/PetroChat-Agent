@@ -58,6 +58,131 @@ def _loads_json(value: str, default: Any) -> Any:
         return default
 
 
+def _normalise_text(value: Any) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _contains_text(haystack: str, needle: Any) -> bool:
+    text = _normalise_text(needle)
+    return bool(text) and text in haystack
+
+
+def _json_text(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value or "")
+
+
+def _prediction_text(prediction: dict[str, Any]) -> str:
+    parts = [
+        prediction.get("question"),
+        prediction.get("answer"),
+        prediction.get("sql"),
+        prediction.get("memory_used"),
+    ]
+    return _normalise_text(" ".join(_json_text(part) for part in parts))
+
+
+def _memory_values_for_key(row: dict[str, str], key: str) -> list[str]:
+    values: list[str] = []
+    for field in ("memory_before", "memory_update", "memory_after"):
+        payload = _loads_json(row.get(field, ""), {})
+        if isinstance(payload, dict) and key in payload:
+            values.append(str(payload[key]))
+    return values
+
+
+def _memory_hit(row: dict[str, str], prediction: dict[str, Any], required_keys: list[str]) -> bool:
+    memory_used = prediction.get("memory_used") or []
+    if isinstance(memory_used, list) and memory_used:
+        return True
+    text = _prediction_text(prediction)
+    for key in required_keys:
+        if _contains_text(text, key):
+            return True
+        if any(_contains_text(text, value) for value in _memory_values_for_key(row, key)):
+            return True
+    return False
+
+
+def _memory_ignore_violation(row: dict[str, str], prediction: dict[str, Any], ignored_key: str) -> bool:
+    text = _prediction_text(prediction)
+    if _contains_text(text, ignored_key):
+        return True
+    return any(_contains_text(text, value) for value in _memory_values_for_key(row, ignored_key))
+
+
+def _retrieved_item_text(item: Any) -> str:
+    if isinstance(item, dict):
+        fields: list[Any] = [
+            item.get("source_doc"),
+            item.get("source"),
+            item.get("section"),
+            item.get("section_number"),
+            item.get("chunk_id"),
+            item.get("id"),
+            item.get("content"),
+            item.get("page_content"),
+        ]
+        metadata = item.get("metadata")
+        if isinstance(metadata, dict):
+            fields.extend([
+                metadata.get("source_doc"),
+                metadata.get("source"),
+                metadata.get("section"),
+                metadata.get("section_number"),
+                metadata.get("chunk_id"),
+                metadata.get("id"),
+            ])
+        return _normalise_text(" ".join(_json_text(field) for field in fields))
+    return _normalise_text(item)
+
+
+def _rag_item_matches(row: dict[str, str], item: Any) -> bool:
+    text = _retrieved_item_text(item)
+    expected_chunk = row.get("expected_chunk_id", "")
+    expected_source = row.get("expected_source_file", "")
+    expected_section = row.get("expected_section", "")
+    if expected_chunk and _contains_text(text, expected_chunk):
+        return True
+    if expected_source and _contains_text(text, expected_source):
+        if not expected_section or _contains_text(text, expected_section):
+            return True
+        return True
+    return False
+
+
+def _first_rag_rank(row: dict[str, str], retrieved: Any) -> int | None:
+    rows = retrieved if isinstance(retrieved, list) else []
+    for index, item in enumerate(rows, start=1):
+        if _rag_item_matches(row, item):
+            return index
+    return None
+
+
+def _must_point_coverage(row: dict[str, str], prediction: dict[str, Any]) -> tuple[int, int]:
+    points = [str(item) for item in _loads_json(row.get("must_include_points", ""), [])]
+    if not points:
+        return 0, 0
+    answer = _normalise_text(prediction.get("answer", ""))
+    hits = sum(1 for point in points if _contains_text(answer, point))
+    return hits, len(points)
+
+
+def _has_forbidden_point(row: dict[str, str], prediction: dict[str, Any]) -> bool:
+    points = [str(item) for item in _loads_json(row.get("forbidden_points", ""), [])]
+    answer = _normalise_text(prediction.get("answer", ""))
+    return any(_contains_text(answer, point) for point in points)
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "ok", "pass", "passed"}
+
+
 def _required_path(golden_dir: Path, key: str) -> Path:
     path = golden_dir / REQUIRED_FILES[key]
     if not path.exists():
@@ -222,30 +347,57 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
     sql_table_hits = 0
     sql_filter_hits = 0
     sql_filter_total = 0
+    sql_contract_hits = 0
+    sql_execution_scored = 0
+    sql_execution_correct = 0
 
     for row in sql_rows:
         pred = pred_by_key.get((row["dialogue_id"], row["turn_id"]))
         if not pred:
             continue
         sql = str(pred.get("sql") or "")
+        sql_is_valid = False
         if sql:
             sql_present += 1
-            if validate_sql(sql).ok:
+            sql_is_valid = validate_sql(sql).ok
+            if sql_is_valid:
                 sql_valid += 1
         expected_tables = [str(t).lower() for t in _loads_json(row.get("expected_tables", ""), [])]
-        if sql and all(table in sql.lower() for table in expected_tables):
+        table_hit = bool(sql) and all(table in sql.lower() for table in expected_tables)
+        if table_hit:
             sql_table_hits += 1
         filters = _loads_json(row.get("expected_filters", ""), {})
+        row_filter_total = 0
+        row_filter_hits = 0
         if isinstance(filters, dict):
             for value in filters.values():
                 if value is None:
                     continue
                 sql_filter_total += 1
+                row_filter_total += 1
                 if str(value).lower() in sql.lower():
                     sql_filter_hits += 1
+                    row_filter_hits += 1
+        row_filter_hit = row_filter_hits == row_filter_total
+        if sql_is_valid and table_hit and row_filter_hit:
+            sql_contract_hits += 1
+
+        execution_correct = _optional_bool(pred.get("execution_correct"))
+        if execution_correct is None:
+            execution_correct = _optional_bool(pred.get("result_match"))
+        if execution_correct is None:
+            execution_correct = _optional_bool(pred.get("execution_ok"))
+        if execution_correct is not None:
+            sql_execution_scored += 1
+            if execution_correct:
+                sql_execution_correct += 1
 
     rag_hits = 0
     rag_scored = 0
+    rag_reciprocal_rank_sum = 0.0
+    rag_must_hits = 0
+    rag_must_total = 0
+    rag_faithful_hits = 0
     for row in rag_rows:
         pred = pred_by_key.get((row["dialogue_id"], row["turn_id"]))
         if not pred:
@@ -253,11 +405,37 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
         retrieved = pred.get("retrieved") or []
         if not isinstance(retrieved, list):
             retrieved = []
-        expected_source = row.get("expected_source_file", "")
-        source_hit = any(expected_source and expected_source in str(item) for item in retrieved[:5])
+        rank = _first_rag_rank(row, retrieved)
+        must_hits, must_total = _must_point_coverage(row, pred)
+        rag_must_hits += must_hits
+        rag_must_total += must_total
         rag_scored += 1
-        if source_hit:
+        if rank is not None:
+            rag_reciprocal_rank_sum += 1 / rank
+        if rank is not None and rank <= 5:
             rag_hits += 1
+        if rank is not None and not _has_forbidden_point(row, pred) and str(pred.get("answer") or "").strip():
+            rag_faithful_hits += 1
+
+    memory_rows = data["memory"]
+    memory_required = 0
+    memory_hits = 0
+    memory_ignore_total = 0
+    memory_ignore_violations = 0
+    for row in memory_rows:
+        pred = pred_by_key.get((row["dialogue_id"], row["turn_id"]))
+        if not pred:
+            continue
+        should_use = [str(item) for item in _loads_json(row.get("memory_should_use", ""), [])]
+        if should_use:
+            memory_required += 1
+            if _memory_hit(row, pred, should_use):
+                memory_hits += 1
+        should_ignore = [str(item) for item in _loads_json(row.get("memory_should_ignore", ""), [])]
+        for ignored_key in should_ignore:
+            memory_ignore_total += 1
+            if _memory_ignore_violation(row, pred, ignored_key):
+                memory_ignore_violations += 1
 
     return {
         "prediction_count": len(predictions),
@@ -270,8 +448,24 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
         "sql_validation_rate": round(sql_valid / (sql_present or 1), 4),
         "sql_table_recall": round(sql_table_hits / (len(sql_rows) or 1), 4),
         "sql_filter_value_recall": round(sql_filter_hits / (sql_filter_total or 1), 4),
+        "sql_contract_accuracy": round(sql_contract_hits / (len(sql_rows) or 1), 4),
+        "sql_execution_accuracy": (
+            round(sql_execution_correct / sql_execution_scored, 4)
+            if sql_execution_scored
+            else None
+        ),
+        "sql_execution_scored_count": sql_execution_scored,
         "rag_recall_at_5": round(rag_hits / (rag_scored or 1), 4),
+        "rag_mrr": round(rag_reciprocal_rank_sum / (rag_scored or 1), 4),
+        "rag_evidence_coverage": round(rag_must_hits / (rag_must_total or 1), 4),
+        "rag_faithfulness_proxy": round(rag_faithful_hits / (rag_scored or 1), 4),
         "rag_scored_count": rag_scored,
+        "memory_hit_rate": round(memory_hits / (memory_required or 1), 4),
+        "memory_required_count": memory_required,
+        "memory_ignore_violation_rate": round(
+            memory_ignore_violations / (memory_ignore_total or 1), 4
+        ),
+        "memory_ignore_checked_count": memory_ignore_total,
     }
 
 
@@ -322,7 +516,14 @@ def _render_markdown(result: dict[str, Any]) -> str:
             f"- SQL validation rate: {prediction['sql_validation_rate']}",
             f"- SQL table recall: {prediction['sql_table_recall']}",
             f"- SQL filter value recall: {prediction['sql_filter_value_recall']}",
+            f"- SQL contract accuracy: {prediction.get('sql_contract_accuracy', 0)}",
+            f"- SQL execution accuracy: {prediction.get('sql_execution_accuracy')}",
             f"- RAG Recall@5: {prediction['rag_recall_at_5']}",
+            f"- RAG MRR: {prediction.get('rag_mrr', 0)}",
+            f"- RAG evidence coverage: {prediction.get('rag_evidence_coverage', 0)}",
+            f"- RAG faithfulness proxy: {prediction.get('rag_faithfulness_proxy', 0)}",
+            f"- Memory hit rate: {prediction.get('memory_hit_rate', 0)}",
+            f"- Memory ignore violation rate: {prediction.get('memory_ignore_violation_rate', 0)}",
         ])
     else:
         lines.extend([

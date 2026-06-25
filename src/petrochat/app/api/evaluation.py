@@ -115,7 +115,7 @@ def _clip(value: Any, limit: int = 96) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= limit:
         return text
-    return f"{text[:limit - 1]}…"
+    return f"{text[:limit - 1]}..."
 
 
 def _sql_summary(sql: str) -> dict[str, Any]:
@@ -219,7 +219,7 @@ def _to_failure_case(row: dict[str, Any]) -> dict[str, Any]:
         "sqlSummary": _sql_summary(str(row.get("sql") or "")),
         "retrievalSummary": _retrieval_summary(row.get("retrieved")),
         "traceHint": _trace_hint(dialogue_id, turn_id),
-        "latencyMs": int(row.get("latency_ms") or 0),
+        "latencyMs": latency_ms if (latency_ms := int(row.get("latency_ms") or 0)) else 0,
     }
 
 
@@ -321,9 +321,44 @@ def _to_dashboard_summary(raw: dict[str, Any], source_path: Path) -> dict[str, A
                 "detail": "expected_filters",
             },
             {
+                "label": "SQL 合约准确率",
+                "value": _percent(prediction.get("sql_contract_accuracy")),
+                "detail": "valid + tables + filters",
+            },
+            {
+                "label": "SQL 执行准确率",
+                "value": _percent(prediction.get("sql_execution_accuracy")),
+                "detail": f"scored={prediction.get('sql_execution_scored_count', 0)}",
+            },
+            {
                 "label": "RAG Recall@5",
                 "value": _percent(prediction.get("rag_recall_at_5")),
                 "detail": "retrieved top-5",
+            },
+            {
+                "label": "RAG MRR",
+                "value": _percent(prediction.get("rag_mrr")),
+                "detail": "first evidence rank",
+            },
+            {
+                "label": "证据覆盖率",
+                "value": _percent(prediction.get("rag_evidence_coverage")),
+                "detail": "must_include_points",
+            },
+            {
+                "label": "忠实性代理指标",
+                "value": _percent(prediction.get("rag_faithfulness_proxy")),
+                "detail": "retrieval hit + no forbidden point",
+            },
+            {
+                "label": "Memory Hit Rate",
+                "value": _percent(prediction.get("memory_hit_rate")),
+                "detail": f"required={prediction.get('memory_required_count', 0)}",
+            },
+            {
+                "label": "记忆忽略违规率",
+                "value": _percent(prediction.get("memory_ignore_violation_rate")),
+                "detail": f"checked={prediction.get('memory_ignore_checked_count', 0)}",
             },
         ],
         "scenarioCounts": [
@@ -369,7 +404,10 @@ def _to_run_summary(raw: dict[str, Any], summary_path: Path, prediction_path: Pa
             "predictionCount": prediction.get("prediction_count", 0),
             "sqlValidationRate": _percent(prediction.get("sql_validation_rate")),
             "sqlTableRecall": _percent(prediction.get("sql_table_recall")),
+            "sqlContractAccuracy": _percent(prediction.get("sql_contract_accuracy")),
             "ragRecallAt5": _percent(prediction.get("rag_recall_at_5")),
+            "ragMrr": _percent(prediction.get("rag_mrr")),
+            "memoryHitRate": _percent(prediction.get("memory_hit_rate")),
         },
         "artifacts": {
             "summary": summary_path.exists(),

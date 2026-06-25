@@ -97,3 +97,111 @@ def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
     assert result["rag_contract"]["evidence_count"] == 1
     assert (out_dir / "golden_eval_summary.json").exists()
     assert (out_dir / "golden_eval_summary.md").exists()
+
+
+def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
+    golden = tmp_path / "golden"
+    golden.mkdir()
+
+    _write_csv(golden / "golden_dialogue_turns.csv", [
+        {
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "user_role": "engineer",
+            "scenario_type": "rag_sql_memory",
+            "difficulty": "hard",
+            "user_message": "query refinery-1 task and explain policy",
+            "expected_intent": "qa",
+            "expected_answer_points": "[\"safe operation\"]",
+            "forbidden_behavior": "[]",
+        }
+    ])
+    _write_csv(golden / "golden_memory_state.csv", [
+        {
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "memory_before": "{\"operation_department\":\"refinery-1\",\"old_department\":\"legacy\"}",
+            "memory_update": "{}",
+            "memory_after": "{\"operation_department\":\"refinery-1\"}",
+            "memory_should_use": "[\"operation_department\"]",
+            "memory_should_ignore": "[\"old_department\"]",
+            "requires_clarification": "False",
+        }
+    ])
+    _write_csv(golden / "golden_sql_expectation.csv", [
+        {
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "expected_tables": "[\"affair_task\"]",
+            "expected_join": "",
+            "expected_fields": "[\"task_id\"]",
+            "expected_filters": "{\"affair_task.operation_department\":\"refinery-1\"}",
+            "expected_group_by": "",
+            "expected_order_by": "",
+            "expected_limit": "20",
+            "expected_sql_template": (
+                "SELECT task_id FROM affair_task "
+                "WHERE operation_department = 'refinery-1' LIMIT 20;"
+            ),
+            "forbidden_sql_operations": "[]",
+        }
+    ])
+    _write_csv(golden / "golden_rag_evidence.csv", [
+        {
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "expected_source_file": "policy.docx",
+            "expected_section": "2.1",
+            "expected_chunk_id": "chunk-9",
+            "query_keywords": "[\"policy\"]",
+            "must_include_points": "[\"safe operation\"]",
+            "forbidden_points": "[\"legacy\"]",
+        }
+    ])
+    _write_csv(golden / "golden_scoring_rubric.csv", [
+        {
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "memory_score": "25",
+            "retrieval_score": "20",
+            "sql_score": "20",
+            "answer_score": "20",
+            "permission_score": "15",
+            "total_score": "100",
+            "critical_failures": "[]",
+        }
+    ])
+    (golden / "validation_summary.json").write_text("{}", encoding="utf-8")
+
+    prediction_path = tmp_path / "predictions.jsonl"
+    prediction_path.write_text(
+        json.dumps({
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "status": "ok",
+            "latency_ms": 120,
+            "route": "qa",
+            "question": "query task",
+            "answer": "The answer covers safe operation.",
+            "sql": "SELECT task_id FROM affair_task WHERE operation_department = 'refinery-1' LIMIT 20",
+            "retrieved": [
+                {"source_doc": "other.docx", "section": "1"},
+                {"source_doc": "policy.docx", "section": "2.1", "chunk_id": "chunk-9"},
+            ],
+            "memory_used": ["101"],
+            "execution_correct": True,
+        }, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    result = evaluate_golden_set(golden, prediction_path=prediction_path)
+    metrics = result["prediction_metrics"]
+
+    assert metrics["sql_contract_accuracy"] == 1
+    assert metrics["sql_execution_accuracy"] == 1
+    assert metrics["rag_recall_at_5"] == 1
+    assert metrics["rag_mrr"] == 0.5
+    assert metrics["rag_evidence_coverage"] == 1
+    assert metrics["rag_faithfulness_proxy"] == 1
+    assert metrics["memory_hit_rate"] == 1
+    assert metrics["memory_ignore_violation_rate"] == 0

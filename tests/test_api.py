@@ -308,7 +308,17 @@ def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:
                 "sql_validation_rate": 1.0,
                 "sql_table_recall": 0.75,
                 "sql_filter_value_recall": 0.5,
+                "sql_contract_accuracy": 0.5,
+                "sql_execution_accuracy": 0.25,
+                "sql_execution_scored_count": 4,
                 "rag_recall_at_5": 0.25,
+                "rag_mrr": 0.125,
+                "rag_evidence_coverage": 0.5,
+                "rag_faithfulness_proxy": 0.25,
+                "memory_hit_rate": 0.6,
+                "memory_required_count": 5,
+                "memory_ignore_violation_rate": 0.0,
+                "memory_ignore_checked_count": 1,
             },
             "declared_validation_summary": {"generated_at": "2026-06-24T15:27:01"},
         }, ensure_ascii=False),
@@ -325,6 +335,10 @@ def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:
     prediction_by_label = {item["label"]: item for item in data["predictionMetrics"]}
     assert prediction_by_label["Agent 成功率"]["value"] == "88%"
     assert prediction_by_label["SQL 表召回"]["value"] == "75%"
+    assert prediction_by_label["SQL 合约准确率"]["value"] == "50%"
+    assert prediction_by_label["SQL 执行准确率"]["detail"] == "scored=4"
+    assert prediction_by_label["RAG MRR"]["value"] == "12%"
+    assert prediction_by_label["Memory Hit Rate"]["detail"] == "required=5"
     assert data["scenarioCounts"] == [{"label": "nl2sql_condition_memory", "value": 4}]
 
     get_settings.cache_clear()
