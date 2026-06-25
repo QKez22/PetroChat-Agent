@@ -157,22 +157,16 @@ uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 
 ## 8. Git 提交命令
 
-提交信息需要带明确阶段序号。本轮评估历史和 Trace 对照建议使用：
+提交信息需要带明确阶段序号。本轮评估展示收尾建议使用：
 
 ```powershell
-git add src/petrochat/app/api/evaluation.py `
-        src/petrochat/app/core/config.py `
-        tests/test_api.py `
-        frontend/src/App.vue `
-        frontend/src/services/chatStream.js `
-        frontend/src/data/evaluationSummary.js `
-        frontend/src/styles.css `
-        frontend/README.md `
-        README.md `
-        docs/1.4-工具与API接口文档.md `
+git add docs/Phase5.9-评估展示报告.md `
+        docs/README.md `
         docs/1.6-评测标准文档.md `
-        docs/v1.1-记忆评估与前端规划.md
+        docs/v1.1-记忆评估与前端规划.md `
+        README.md `
+        frontend/README.md
 
-git commit -m "feat(phase-5.8): 增加评估历史和 Trace 对照"
+git commit -m "docs(phase-5.9): 固化评估展示报告"
 git push origin main
 ```
