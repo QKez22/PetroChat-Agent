@@ -887,6 +887,13 @@ button {
   margin-bottom: 4px;
 }
 
+.eval-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .eval-dataset {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -977,6 +984,10 @@ button {
   color: #66737d;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.eval-note.warning {
+  color: #b7372f;
 }
 
 .admin-content {

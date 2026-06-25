@@ -31,13 +31,14 @@ import {
   checkHealth,
   deleteSession,
   getMe,
+  getLatestEvaluation,
   getSession,
   listSessions,
   login,
   sendChat,
   streamChat,
 } from "./services/chatStream";
-import { evaluationSummary } from "./data/evaluationSummary";
+import { evaluationSummary as fallbackEvaluationSummary } from "./data/evaluationSummary";
 
 const md = new MarkdownIt({
   html: false,
@@ -83,6 +84,9 @@ const localToken = ref(localStorage.getItem(TOKEN_STORAGE_KEY) || "");
 const sessions = ref([]);
 const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
+const evaluation = ref(fallbackEvaluationSummary);
+const evaluationError = ref("");
+const isLoadingEvaluation = ref(false);
 
 const isAdmin = computed(() => currentUser.value?.role === "admin");
 const roleLabel = computed(() => (isAdmin.value ? "管理员 admin" : "工程师用户 engineer"));
@@ -196,6 +200,24 @@ async function refreshSessions() {
   }
 }
 
+async function refreshEvaluation() {
+  if (!isAdmin.value) {
+    evaluation.value = fallbackEvaluationSummary;
+    evaluationError.value = "";
+    return;
+  }
+  isLoadingEvaluation.value = true;
+  evaluationError.value = "";
+  try {
+    evaluation.value = await getLatestEvaluation();
+  } catch (error) {
+    evaluation.value = fallbackEvaluationSummary;
+    evaluationError.value = error.message || "评估摘要加载失败，已使用静态摘要";
+  } finally {
+    isLoadingEvaluation.value = false;
+  }
+}
+
 async function restoreAuth() {
   if (!localToken.value) {
     return;
@@ -204,6 +226,9 @@ async function restoreAuth() {
     const user = await getMe(localToken.value);
     persistAuth(localToken.value, user);
     await refreshSessions();
+    if (user.role === "admin") {
+      await refreshEvaluation();
+    }
   } catch {
     clearAuth();
   }
@@ -217,6 +242,9 @@ async function handleLogin() {
     persistAuth(result.token, result.user);
     activeView.value = "chat";
     await refreshSessions();
+    if (result.user.role === "admin") {
+      await refreshEvaluation();
+    }
   } catch (error) {
     loginError.value = error.message || "登录失败";
   } finally {
@@ -801,32 +829,37 @@ onMounted(async () => {
           <section class="evaluation-panel">
             <div class="panel-heading">
               <div>
-                <h3>{{ evaluationSummary.title }}</h3>
-                <span>{{ evaluationSummary.generatedAt }} / {{ evaluationSummary.source }}</span>
+                <h3>{{ evaluation.title }}</h3>
+                <span>{{ evaluation.generatedAt }} / {{ evaluation.source }}</span>
               </div>
-              <span class="status-pill done">Phase 5.5</span>
+              <div class="eval-heading-actions">
+                <button class="tiny-button" type="button" title="刷新评估摘要" @click="refreshEvaluation">
+                  <RefreshCw :size="14" :class="{ spin: isLoadingEvaluation }" />
+                </button>
+                <span class="status-pill done">Phase 5.6</span>
+              </div>
             </div>
 
             <div class="eval-dataset">
               <div>
                 <span>对话组</span>
-                <strong>{{ evaluationSummary.dataset.dialogues }}</strong>
+                <strong>{{ evaluation.dataset.dialogues }}</strong>
               </div>
               <div>
                 <span>总轮次</span>
-                <strong>{{ evaluationSummary.dataset.turns }}</strong>
+                <strong>{{ evaluation.dataset.turns }}</strong>
               </div>
               <div>
                 <span>SQL 期望</span>
-                <strong>{{ evaluationSummary.dataset.sqlExpectations }}</strong>
+                <strong>{{ evaluation.dataset.sqlExpectations }}</strong>
               </div>
               <div>
                 <span>RAG 证据</span>
-                <strong>{{ evaluationSummary.dataset.ragEvidence }}</strong>
+                <strong>{{ evaluation.dataset.ragEvidence }}</strong>
               </div>
               <div>
                 <span>记忆状态</span>
-                <strong>{{ evaluationSummary.dataset.memoryStates }}</strong>
+                <strong>{{ evaluation.dataset.memoryStates }}</strong>
               </div>
             </div>
 
@@ -834,7 +867,7 @@ onMounted(async () => {
               <div class="eval-column">
                 <h4>合约指标</h4>
                 <div class="eval-metric-list">
-                  <div v-for="metric in evaluationSummary.contractMetrics" :key="metric.label" class="eval-metric">
+                  <div v-for="metric in evaluation.contractMetrics" :key="metric.label" class="eval-metric">
                     <span>{{ metric.label }}</span>
                     <strong>{{ metric.value }}</strong>
                     <small>{{ metric.detail }}</small>
@@ -845,7 +878,7 @@ onMounted(async () => {
               <div class="eval-column">
                 <h4>Prediction 指标</h4>
                 <div class="eval-metric-list">
-                  <div v-for="metric in evaluationSummary.predictionMetrics" :key="metric.label" class="eval-metric">
+                  <div v-for="metric in evaluation.predictionMetrics" :key="metric.label" class="eval-metric">
                     <span>{{ metric.label }}</span>
                     <strong>{{ metric.value }}</strong>
                     <small>{{ metric.detail }}</small>
@@ -856,7 +889,7 @@ onMounted(async () => {
               <div class="eval-column">
                 <h4>场景分布</h4>
                 <div class="scenario-list">
-                  <div v-for="item in evaluationSummary.scenarioCounts" :key="item.label">
+                  <div v-for="item in evaluation.scenarioCounts" :key="item.label">
                     <span>{{ item.label }}</span>
                     <strong>{{ item.value }}</strong>
                   </div>
@@ -864,7 +897,8 @@ onMounted(async () => {
               </div>
             </div>
 
-            <p class="eval-note">{{ evaluationSummary.note }}</p>
+            <p v-if="evaluationError" class="eval-note warning">{{ evaluationError }}</p>
+            <p class="eval-note">{{ evaluation.note }}</p>
           </section>
 
           <section class="admin-content">

@@ -150,3 +150,8 @@ export async function deleteSession(sessionId, userId) {
   });
   return readJson(response);
 }
+
+export async function getLatestEvaluation() {
+  const response = await fetch(`${API_BASE}/api/evaluation/latest`);
+  return readJson(response);
+}

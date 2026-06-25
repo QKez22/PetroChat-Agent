@@ -5,7 +5,7 @@
 - 登录页：使用后端 `/api/auth/login`，前端 localStorage 保存本地演示 token。
 - 工程师对话台：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和图表。
 - 历史会话：左侧栏调用 `/api/sessions`，支持恢复和删除当前用户会话。
-- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要和导出能力。
+- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要和导出能力；评估摘要优先读取后端 `/api/evaluation/latest`，失败时回退静态摘要。
 
 ## 1. 版本要求
 
@@ -157,17 +157,23 @@ uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 
 ## 8. Git 提交命令
 
-提交信息需要带明确阶段序号。本轮管理员评估看板建议使用：
+提交信息需要带明确阶段序号。本轮评估结果 API 建议使用：
 
 ```powershell
-git add frontend/src/App.vue `
+git add src/petrochat/app/api/evaluation.py `
+        src/petrochat/app/api/__init__.py `
+        src/petrochat/app/core/config.py `
+        tests/test_api.py `
+        frontend/src/App.vue `
+        frontend/src/services/chatStream.js `
         frontend/src/data/evaluationSummary.js `
         frontend/src/styles.css `
         frontend/README.md `
         README.md `
+        docs/1.4-工具与API接口文档.md `
         docs/1.6-评测标准文档.md `
         docs/v1.1-记忆评估与前端规划.md
 
-git commit -m "feat(phase-5.5): 增加管理员评估看板"
+git commit -m "feat(phase-5.6): 增加评估结果 API"
 git push origin main
 ```

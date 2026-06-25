@@ -64,6 +64,9 @@ class Settings(BaseSettings):
         default=PROJECT_ROOT / "data" / "runtime" / "petrochat_sessions.sqlite3"
     )
     short_term_turns: int = Field(default=6)
+    eval_results_path: Path = Field(
+        default=PROJECT_ROOT / "data" / "eval_results" / "golden_eval_summary.json"
+    )
 
     @property
     def chroma_url(self) -> str:

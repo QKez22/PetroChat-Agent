@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from petrochat.main import app
@@ -47,8 +49,10 @@ def test_auth_endpoints_in_openapi() -> None:
     paths = resp.json()["paths"]
     assert "/api/auth/login" in paths
     assert "/api/auth/me" in paths
+    assert "/api/evaluation/latest" in paths
     assert "post" in paths["/api/auth/login"]
     assert "get" in paths["/api/auth/me"]
+    assert "get" in paths["/api/evaluation/latest"]
 
 
 def test_dev_login_returns_local_token(monkeypatch) -> None:
@@ -91,4 +95,55 @@ def test_delete_session_checks_user_id(monkeypatch, tmp_path) -> None:
     assert allowed.json() == {"deleted": True}
 
     get_conversation_store.cache_clear()
+    get_settings.cache_clear()
+
+
+def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:
+    from petrochat.app.core.config import get_settings
+
+    summary_path = tmp_path / "golden_eval_summary.json"
+    summary_path.write_text(
+        json.dumps({
+            "dataset_profile": {
+                "dialogue_count": 2,
+                "turn_count": 8,
+                "sql_expectation_count": 3,
+                "rag_evidence_count": 4,
+                "memory_state_count": 8,
+                "scenario_counts": {"nl2sql_condition_memory": 4},
+            },
+            "sql_contract": {
+                "template_count": 3,
+                "template_valid_count": 3,
+                "template_valid_rate": 1.0,
+                "write_operation_violations": 0,
+                "select_star_violations": 0,
+            },
+            "memory_contract": {
+                "requires_memory_use_turns": 5,
+                "requires_memory_ignore_turns": 1,
+            },
+            "rag_contract": {"evidence_count": 4},
+            "prediction_metrics": {
+                "prediction_count": 8,
+                "sql_validation_rate": 1.0,
+                "sql_table_recall": 0.75,
+                "sql_filter_value_recall": 0.5,
+                "rag_recall_at_5": 0.25,
+            },
+            "declared_validation_summary": {"generated_at": "2026-06-24T15:27:01"},
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EVAL_RESULTS_PATH", str(summary_path))
+    get_settings.cache_clear()
+
+    resp = client.get("/api/evaluation/latest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dataset"]["dialogues"] == 2
+    assert data["contractMetrics"][0]["value"] == "100%"
+    assert data["predictionMetrics"][2]["value"] == "75%"
+    assert data["scenarioCounts"] == [{"label": "nl2sql_condition_memory", "value": 4}]
+
     get_settings.cache_clear()

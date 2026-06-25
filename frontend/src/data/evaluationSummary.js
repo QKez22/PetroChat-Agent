@@ -2,7 +2,7 @@ export const evaluationSummary = {
   title: "Golden Set 评估摘要",
   generatedAt: "2026-06-24 15:27",
   source: "data/ducuments/agent_memory_golden_set",
-  note: "仅展示聚合指标；原始 Golden Set 与评估结果文件不提交远程。",
+  note: "后端评估 API 不可用时使用此静态摘要；原始 Golden Set 与评估结果文件不提交远程。",
   dataset: {
     dialogues: 100,
     turns: 390,
