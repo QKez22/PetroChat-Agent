@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from test_memory import make_memory_test_engine
 
 from petrochat.main import app
 
@@ -52,11 +53,19 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "/api/evaluation/latest" in paths
     assert "/api/evaluation/failures" in paths
     assert "/api/evaluation/runs" in paths
+    assert "/api/memory" in paths
+    assert "/api/memory/{memory_id}" in paths
+    assert "/api/memory/{memory_id}/disable" in paths
+    assert "/api/memory/{memory_id}/events" in paths
     assert "post" in paths["/api/auth/login"]
     assert "get" in paths["/api/auth/me"]
     assert "get" in paths["/api/evaluation/latest"]
     assert "get" in paths["/api/evaluation/failures"]
     assert "get" in paths["/api/evaluation/runs"]
+    assert "get" in paths["/api/memory"]
+    assert "post" in paths["/api/memory"]
+    assert "patch" in paths["/api/memory/{memory_id}"]
+    assert "delete" in paths["/api/memory/{memory_id}"]
 
 
 def test_dev_login_returns_local_token(monkeypatch) -> None:
@@ -187,28 +196,81 @@ def test_evaluation_runs_reads_local_summaries(monkeypatch, tmp_path) -> None:
     assert me_resp.json()["username"] == "admin"
 
 
-def test_delete_session_checks_user_id(monkeypatch, tmp_path) -> None:
-    from petrochat.app.core.config import get_settings
+def test_delete_session_checks_user_id(monkeypatch) -> None:
     from petrochat.app.memory import get_conversation_store
+    from petrochat.app.memory import store as store_module
 
-    monkeypatch.setenv("SESSION_STORE_PATH", str(tmp_path / "sessions.sqlite3"))
-    get_settings.cache_clear()
+    engine = make_memory_test_engine()
+    monkeypatch.setattr(store_module, "get_engine", lambda: engine)
     get_conversation_store.cache_clear()
 
     store = get_conversation_store()
-    session_id = store.create_session(user_id="u1", title="owned by u1")
+    session_id = store.create_session(user_id="1", title="owned by u1")
     store.append_turn(session_id, "hello", "world")
 
-    denied = client.delete(f"/api/sessions/{session_id}", params={"user_id": "u2"})
+    denied = client.delete(f"/api/sessions/{session_id}", params={"user_id": "2"})
     assert denied.status_code == 404
     assert store.list_messages(session_id)
 
-    allowed = client.delete(f"/api/sessions/{session_id}", params={"user_id": "u1"})
+    allowed = client.delete(f"/api/sessions/{session_id}", params={"user_id": "1"})
     assert allowed.status_code == 200
     assert allowed.json() == {"deleted": True}
 
     get_conversation_store.cache_clear()
-    get_settings.cache_clear()
+
+
+def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
+    from petrochat.app.memory import get_long_term_memory_store
+    from petrochat.app.memory import long_term as long_term_module
+
+    engine = make_memory_test_engine()
+    monkeypatch.setattr(long_term_module, "get_engine", lambda: engine)
+    get_long_term_memory_store.cache_clear()
+
+    create_resp = client.post(
+        "/api/memory",
+        json={
+            "user_id": "1",
+            "memory_type": "preference",
+            "content": "用户常看炼油一部的动设备任务",
+            "source": "manual",
+            "confidence": 0.9,
+            "metadata": {"department": "炼油一部"},
+            "actor_id": "1",
+        },
+    )
+    assert create_resp.status_code == 200
+    item = create_resp.json()
+    assert item["status"] == "active"
+    assert item["metadata"]["department"] == "炼油一部"
+
+    list_resp = client.get("/api/memory", params={"user_id": "1"})
+    assert list_resp.status_code == 200
+    assert [row["id"] for row in list_resp.json()] == [item["id"]]
+
+    update_resp = client.patch(
+        f"/api/memory/{item['id']}",
+        json={
+            "content": "用户常看炼油一部的动设备和仪表任务",
+            "confidence": 0.8,
+            "actor_id": "1",
+        },
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["confidence"] == 0.8
+
+    disable_resp = client.post(
+        f"/api/memory/{item['id']}/disable",
+        json={"actor_id": "1", "reason": "用户要求暂停"},
+    )
+    assert disable_resp.status_code == 200
+    assert disable_resp.json()["status"] == "disabled"
+
+    events_resp = client.get(f"/api/memory/{item['id']}/events")
+    assert events_resp.status_code == 200
+    assert [row["event_type"] for row in events_resp.json()] == ["created", "updated", "disabled"]
+
+    get_long_term_memory_store.cache_clear()
 
 
 def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:

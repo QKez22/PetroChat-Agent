@@ -60,9 +60,6 @@ class Settings(BaseSettings):
     mysql_tables_whitelist: str = Field(default="affair,affair_task")
     mysql_enum_sample_threshold: int = Field(default=30)
 
-    session_store_path: Path = Field(
-        default=PROJECT_ROOT / "data" / "runtime" / "petrochat_sessions.sqlite3"
-    )
     short_term_turns: int = Field(default=6)
     eval_results_path: Path = Field(
         default=PROJECT_ROOT / "data" / "eval_results" / "golden_eval_summary.json"

@@ -1,20 +1,37 @@
-"""SQLite-backed conversation store for short-term memory."""
+"""MySQL-backed conversation store for short-term memory."""
 
 from __future__ import annotations
 
-import sqlite3
+import random
 import threading
-import uuid
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
-from pathlib import Path
+from typing import Any
 
-from ..core.config import get_settings
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+
+from ..sql.engine import get_engine
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+def _now_db() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
+_id_lock = threading.Lock()
+_last_id = 0
+
+
+def _new_bigint_id() -> int:
+    global _last_id
+    candidate = int(time.time() * 1000) * 100_000 + random.randint(0, 99_999)
+    with _id_lock:
+        if candidate <= _last_id:
+            candidate = _last_id + 1
+        _last_id = candidate
+        return candidate
 
 
 @dataclass(frozen=True)
@@ -29,68 +46,42 @@ class StoredMessage:
 
 
 class ConversationStore:
-    """Small SQLite store for conversation history.
+    """Small MySQL store for conversation history.
 
-    The project already uses a read-only MySQL account for business data. Keeping
-    chat sessions in a separate local SQLite file avoids weakening that boundary
-    while still giving the agent persistent short-term memory.
+    Chat memory uses application tables (`agent_conversation`, `agent_message`)
+    instead of the read-only business tables used by NL2SQL.
     """
 
-    def __init__(self, db_path: Path | str) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, engine: Engine | None = None) -> None:
+        self.engine = engine or get_engine()
         self._lock = threading.RLock()
-        self._ensure_schema()
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
-
-    def _ensure_schema(self) -> None:
-        with self._lock, self._connect() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS conversation (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS message (
-                    id TEXT PRIMARY KEY,
-                    conversation_id TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-                    content TEXT NOT NULL,
-                    route TEXT,
-                    latency_ms INTEGER,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (conversation_id) REFERENCES conversation(id) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_message_conversation_created
-                    ON message(conversation_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_conversation_user_updated
-                    ON conversation(user_id, updated_at DESC);
-                """
-            )
 
     def create_session(self, user_id: str = "default", title: str | None = None) -> str:
-        session_id = uuid.uuid4().hex
-        now = _now_iso()
-        with self._lock, self._connect() as conn:
+        session_id = _new_bigint_id()
+        now = _now_db()
+        with self._lock, self.engine.begin() as conn:
             conn.execute(
-                """
-                INSERT INTO conversation(id, user_id, title, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (session_id, user_id, title or "新会话", now, now),
+                text(
+                    """
+                    INSERT INTO agent_conversation(
+                        id, user_id, title, created_at, updated_at,
+                        expires_at, deleted_at, delete_status, retention_policy
+                    )
+                    VALUES (
+                        :id, :user_id, :title, :created_at, :updated_at,
+                        NULL, NULL, 'active', 'conversation_180d'
+                    )
+                    """
+                ),
+                {
+                    "id": session_id,
+                    "user_id": self._user_id_value(user_id),
+                    "title": title or "新会话",
+                    "created_at": now,
+                    "updated_at": now,
+                },
             )
-        return session_id
+        return str(session_id)
 
     def ensure_session(
         self,
@@ -101,22 +92,26 @@ class ConversationStore:
         if not session_id:
             return self.create_session(user_id=user_id, title=title)
 
-        now = _now_iso()
-        with self._lock, self._connect() as conn:
+        try:
+            session_key = self._id_value(session_id)
+        except ValueError:
+            return self.create_session(user_id=user_id, title=title)
+
+        with self._lock, self.engine.begin() as conn:
             row = conn.execute(
-                "SELECT id FROM conversation WHERE id = ?",
-                (session_id,),
-            ).fetchone()
+                text(
+                    """
+                    SELECT id
+                    FROM agent_conversation
+                    WHERE id = :id AND deleted_at IS NULL
+                    LIMIT 1
+                    """
+                ),
+                {"id": session_key},
+            ).mappings().first()
             if row:
-                return session_id
-            conn.execute(
-                """
-                INSERT INTO conversation(id, user_id, title, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (session_id, user_id, title or "新会话", now, now),
-            )
-        return session_id
+                return str(row["id"])
+        return self.create_session(user_id=user_id, title=title)
 
     def append_message(
         self,
@@ -129,34 +124,36 @@ class ConversationStore:
     ) -> StoredMessage:
         if role not in {"user", "assistant"}:
             raise ValueError(f"unsupported role: {role}")
+        now = _now_db()
+        message_id = _new_bigint_id()
         msg = StoredMessage(
-            id=uuid.uuid4().hex,
-            conversation_id=conversation_id,
+            id=str(message_id),
+            conversation_id=str(conversation_id),
             role=role,
             content=content,
             route=route,
             latency_ms=latency_ms,
-            created_at=_now_iso(),
+            created_at=now,
         )
-        with self._lock, self._connect() as conn:
+        with self._lock, self.engine.begin() as conn:
             conn.execute(
-                """
-                INSERT INTO message(id, conversation_id, role, content, route, latency_ms, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    msg.id,
-                    msg.conversation_id,
-                    msg.role,
-                    msg.content,
-                    msg.route,
-                    msg.latency_ms,
-                    msg.created_at,
+                text(
+                    """
+                    INSERT INTO agent_message(id, conversation_id, role, content, created_at, deleted_at)
+                    VALUES (:id, :conversation_id, :role, :content, :created_at, NULL)
+                    """
                 ),
+                {
+                    "id": message_id,
+                    "conversation_id": self._id_value(conversation_id),
+                    "role": role,
+                    "content": content,
+                    "created_at": now,
+                },
             )
             conn.execute(
-                "UPDATE conversation SET updated_at = ? WHERE id = ?",
-                (msg.created_at, conversation_id),
+                text("UPDATE agent_conversation SET updated_at = :updated_at WHERE id = :id"),
+                {"updated_at": now, "id": self._id_value(conversation_id)},
             )
         return msg
 
@@ -183,78 +180,116 @@ class ConversationStore:
         limit = max(turns, 0) * 2
         if limit <= 0:
             return []
-        with self._lock, self._connect() as conn:
+        with self._lock, self.engine.connect() as conn:
             rows = conn.execute(
-                """
-                SELECT id, conversation_id, role, content, route, latency_ms, created_at
-                FROM message
-                WHERE conversation_id = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (conversation_id, limit),
-            ).fetchall()
-        return [
-            StoredMessage(
-                id=row["id"],
-                conversation_id=row["conversation_id"],
-                role=row["role"],
-                content=row["content"],
-                route=row["route"],
-                latency_ms=row["latency_ms"],
-                created_at=row["created_at"],
-            )
-            for row in reversed(rows)
-        ]
+                text(
+                    """
+                    SELECT id, conversation_id, role, content, created_at
+                    FROM agent_message
+                    WHERE conversation_id = :conversation_id AND deleted_at IS NULL
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"conversation_id": self._id_value(conversation_id), "limit": limit},
+            ).mappings().all()
+        return [self._row_to_message(row) for row in reversed(rows)]
 
-    def list_sessions(self, user_id: str = "default", limit: int = 30) -> list[dict]:
-        with self._lock, self._connect() as conn:
+    def list_sessions(self, user_id: str = "default", limit: int = 30) -> list[dict[str, Any]]:
+        with self._lock, self.engine.connect() as conn:
             rows = conn.execute(
-                """
-                SELECT c.id, c.user_id, c.title, c.created_at, c.updated_at,
-                       COUNT(m.id) AS message_count
-                FROM conversation c
-                LEFT JOIN message m ON m.conversation_id = c.id
-                WHERE c.user_id = ?
-                GROUP BY c.id
-                ORDER BY c.updated_at DESC
-                LIMIT ?
-                """,
-                (user_id, limit),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def list_messages(self, conversation_id: str, limit: int = 200) -> list[StoredMessage]:
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, conversation_id, role, content, route, latency_ms, created_at
-                FROM message
-                WHERE conversation_id = ?
-                ORDER BY created_at ASC
-                LIMIT ?
-                """,
-                (conversation_id, limit),
-            ).fetchall()
+                text(
+                    """
+                    SELECT c.id, c.user_id, c.title, c.created_at, c.updated_at,
+                           COUNT(m.id) AS message_count
+                    FROM agent_conversation c
+                    LEFT JOIN agent_message m
+                        ON m.conversation_id = c.id AND m.deleted_at IS NULL
+                    WHERE c.user_id = :user_id AND c.deleted_at IS NULL
+                    GROUP BY c.id, c.user_id, c.title, c.created_at, c.updated_at
+                    ORDER BY c.updated_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"user_id": self._user_id_value(user_id), "limit": max(1, min(limit, 200))},
+            ).mappings().all()
         return [
-            StoredMessage(
-                id=row["id"],
-                conversation_id=row["conversation_id"],
-                role=row["role"],
-                content=row["content"],
-                route=row["route"],
-                latency_ms=row["latency_ms"],
-                created_at=row["created_at"],
-            )
+            {
+                "id": str(row["id"]),
+                "user_id": str(row["user_id"]),
+                "title": row["title"],
+                "created_at": self._stringify_time(row["created_at"]),
+                "updated_at": self._stringify_time(row["updated_at"]),
+                "message_count": int(row["message_count"] or 0),
+            }
             for row in rows
         ]
 
+    def list_messages(self, conversation_id: str, limit: int = 200) -> list[StoredMessage]:
+        with self._lock, self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, conversation_id, role, content, created_at
+                    FROM agent_message
+                    WHERE conversation_id = :conversation_id AND deleted_at IS NULL
+                    ORDER BY created_at ASC, id ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"conversation_id": self._id_value(conversation_id), "limit": max(1, min(limit, 500))},
+            ).mappings().all()
+        return [self._row_to_message(row) for row in rows]
+
     def delete_session(self, conversation_id: str) -> bool:
-        with self._lock, self._connect() as conn:
-            cur = conn.execute("DELETE FROM conversation WHERE id = ?", (conversation_id,))
-            return cur.rowcount > 0
+        try:
+            conversation_key = self._id_value(conversation_id)
+        except ValueError:
+            return False
+
+        now = _now_db()
+        with self._lock, self.engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    UPDATE agent_conversation
+                    SET deleted_at = :deleted_at, delete_status = 'user_deleted', updated_at = :updated_at
+                    WHERE id = :id AND deleted_at IS NULL
+                    """
+                ),
+                {"deleted_at": now, "updated_at": now, "id": conversation_key},
+            )
+            return result.rowcount > 0
+
+    def _row_to_message(self, row: Any) -> StoredMessage:
+        return StoredMessage(
+            id=str(row["id"]),
+            conversation_id=str(row["conversation_id"]),
+            role=str(row["role"]),
+            content=str(row["content"]),
+            route=None,
+            latency_ms=None,
+            created_at=self._stringify_time(row["created_at"]),
+        )
+
+    def _id_value(self, value: str | int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid bigint id: {value}") from exc
+
+    def _user_id_value(self, value: str | int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def _stringify_time(self, value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        return str(value)
 
 
 @lru_cache(maxsize=1)
 def get_conversation_store() -> ConversationStore:
-    return ConversationStore(get_settings().session_store_path)
+    return ConversationStore()
