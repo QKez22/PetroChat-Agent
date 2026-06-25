@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,18 @@ from ..sql import validate_sql
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
 
 _TABLE_PATTERN = re.compile(r"\b(?:FROM|JOIN)\s+`?([a-zA-Z_][\w]*)`?", re.I)
+_KNOWN_ROUTES = {"qa", "rag", "sql", "general"}
+_ATTRIBUTION_LABELS = {
+    "system": "系统异常",
+    "routing": "路由问题",
+    "sql": "SQL 问题",
+    "retrieval": "检索问题",
+    "memory": "记忆问题",
+    "output": "模型输出问题",
+    "performance": "性能问题",
+    "none": "未触发显式归因",
+}
+_SEVERITY_SCORE = {"fail": 90, "warn": 60, "info": 20}
 
 
 def _percent(value: float | int | None) -> str:
@@ -154,40 +167,122 @@ def _retrieval_summary(retrieved: Any) -> dict[str, Any]:
     return {"count": len(rows), "sources": sources[:3]}
 
 
-def _risk_for_prediction(row: dict[str, Any]) -> tuple[int, str, list[str]]:
-    reasons: list[str] = []
-    score = 0
+def _attribution(
+    kind: str,
+    severity: str,
+    reason: str,
+    next_step: str,
+    evidence: str = "",
+) -> dict[str, str]:
+    return {
+        "type": kind,
+        "label": _ATTRIBUTION_LABELS.get(kind, kind),
+        "severity": severity,
+        "reason": reason,
+        "nextStep": next_step,
+        "evidence": evidence,
+    }
+
+
+def _attributions_for_prediction(row: dict[str, Any]) -> list[dict[str, str]]:
+    attributions: list[dict[str, str]] = []
     route = str(row.get("route") or "")
     status = str(row.get("status") or "ok")
     sql = str(row.get("sql") or "")
     retrieval = _retrieval_summary(row.get("retrieved"))
     latency_ms = int(row.get("latency_ms") or 0)
+    scenario = str(row.get("scenario_type") or "").lower()
+    answer = str(row.get("answer") or "").strip()
 
     if status != "ok":
-        score = max(score, 100)
-        reasons.append(_clip(row.get("error") or f"prediction status={status}", 120))
+        attributions.append(_attribution(
+            "system",
+            "fail",
+            _clip(row.get("error") or f"prediction status={status}", 120),
+            "查看 agent 回放日志、SSE meta 事件和 LangSmith trace，先确认异常节点。",
+            f"status={status}",
+        ))
+
+    if route and route not in _KNOWN_ROUTES:
+        attributions.append(_attribution(
+            "routing",
+            "warn",
+            f"未知路由：{route}",
+            "检查 supervisor 路由枚举、提示词和前端 route 展示映射。",
+            f"route={route}",
+        ))
 
     if route == "sql" and not sql:
-        score = max(score, 90)
-        reasons.append("SQL 路由未生成 SQL")
+        attributions.append(_attribution(
+            "sql",
+            "fail",
+            "SQL 路由未生成 SQL",
+            "检查 NL2SQL generator、schema prompt、function calling 输出和 SQL 提取逻辑。",
+            "route=sql; sql=empty",
+        ))
 
     if sql:
         validation = validate_sql(sql)
         if not validation.ok:
-            score = max(score, 85)
-            reasons.append(f"SQL 校验失败：{_clip(validation.reason, 90)}")
+            attributions.append(_attribution(
+                "sql",
+                "fail",
+                f"SQL 校验失败：{_clip(validation.reason, 90)}",
+                "检查 sqlglot AST 校验结果、表白名单、只读限制和生成提示词。",
+                _clip(validation.reason, 120),
+            ))
 
     if route in {"qa", "rag"} and retrieval["count"] == 0:
-        score = max(score, 65)
-        reasons.append("RAG/QA 路由没有检索引用")
+        attributions.append(_attribution(
+            "retrieval",
+            "warn",
+            "RAG/QA 路由没有检索引用",
+            "检查 Chroma 检索、query rewrite、chunk 切分和 RAG-as-tool 调用条件。",
+            "retrieved=0",
+        ))
 
-    if not str(row.get("answer") or "").strip():
-        score = max(score, 55)
-        reasons.append("未生成回答摘要")
+    if "memory" in scenario and not row.get("memory_used"):
+        attributions.append(_attribution(
+            "memory",
+            "warn",
+            "记忆场景未记录 memory_used",
+            "检查短期滑动窗口、长期记忆召回和 SSE meta 中的 memory_used 字段。",
+            f"scenario={scenario}",
+        ))
+
+    if not answer:
+        attributions.append(_attribution(
+            "output",
+            "warn",
+            "未生成回答摘要",
+            "检查最终 answer 汇总节点、流式 token 输出和 SQL 分支 fallback。",
+            "answer=empty",
+        ))
 
     if latency_ms >= 15000:
-        score = max(score, 45)
-        reasons.append(f"高延迟：{latency_ms} ms")
+        attributions.append(_attribution(
+            "performance",
+            "warn",
+            f"高延迟：{latency_ms} ms",
+            "检查工具调用次数、数据库慢查询、Chroma 检索耗时和 LLM 首 token 延迟。",
+            f"latency_ms={latency_ms}",
+        ))
+
+    if not attributions:
+        attributions.append(_attribution(
+            "none",
+            "info",
+            "未触发显式失败，作为抽样复核样例",
+            "抽样检查回答质量、引用格式和业务语义是否满足 Golden Set。",
+            "rule=none",
+        ))
+
+    return attributions
+
+
+def _risk_for_attributions(attributions: list[dict[str, str]]) -> tuple[int, str, list[str]]:
+    score = max(_SEVERITY_SCORE.get(item["severity"], 20) for item in attributions)
+    reasons = [item["reason"] for item in attributions]
 
     if score >= 80:
         level = "fail"
@@ -195,15 +290,16 @@ def _risk_for_prediction(row: dict[str, Any]) -> tuple[int, str, list[str]]:
         level = "warn"
     else:
         level = "pass"
-        reasons.append("未触发显式失败，作为抽样复核样例")
 
     return score, level, reasons
 
 
 def _to_failure_case(row: dict[str, Any]) -> dict[str, Any]:
-    score, level, reasons = _risk_for_prediction(row)
+    attributions = _attributions_for_prediction(row)
+    score, level, reasons = _risk_for_attributions(attributions)
     dialogue_id = str(row.get("dialogue_id") or "-")
     turn_id = str(row.get("turn_id") or "-")
+    latency_ms = int(row.get("latency_ms") or 0)
     return {
         "id": f"{dialogue_id}:{turn_id}",
         "dialogue": f"{dialogue_id} / turn {turn_id}",
@@ -214,12 +310,14 @@ def _to_failure_case(row: dict[str, Any]) -> dict[str, Any]:
         "riskLevel": level,
         "riskScore": score,
         "reasons": reasons,
+        "primaryAttribution": attributions[0],
+        "attributions": attributions,
         "questionSummary": _clip(row.get("question"), 120),
         "answerSummary": _clip(row.get("answer"), 140),
         "sqlSummary": _sql_summary(str(row.get("sql") or "")),
         "retrievalSummary": _retrieval_summary(row.get("retrieved")),
         "traceHint": _trace_hint(dialogue_id, turn_id),
-        "latencyMs": latency_ms if (latency_ms := int(row.get("latency_ms") or 0)) else 0,
+        "latencyMs": latency_ms,
     }
 
 
@@ -227,12 +325,28 @@ def _failure_report(rows: list[dict[str, Any]], source_path: Path, limit: int) -
     cases = [_to_failure_case(row) for row in rows]
     cases.sort(key=lambda item: (item["riskScore"], item["latencyMs"]), reverse=True)
     limited = cases[:limit]
+    type_counter: Counter[str] = Counter()
+    severity_counter: Counter[str] = Counter()
+    for item in cases:
+        for attribution in item["attributions"]:
+            type_counter[attribution["type"]] += 1
+            severity_counter[attribution["severity"]] += 1
+    attribution_summary = [
+        {
+            "type": kind,
+            "label": _ATTRIBUTION_LABELS.get(kind, kind),
+            "count": count,
+        }
+        for kind, count in type_counter.most_common()
+    ]
     return {
         "title": "评估失败与风险样例",
         "source": str(source_path),
         "totalPredictions": len(rows),
         "failureCount": sum(1 for item in cases if item["riskLevel"] == "fail"),
         "warningCount": sum(1 for item in cases if item["riskLevel"] == "warn"),
+        "attributionSummary": attribution_summary,
+        "severitySummary": dict(severity_counter),
         "returnedCount": len(limited),
         "cases": limited,
         "note": "仅展示截断摘要和风险原因；不返回完整 SQL、完整问题或完整检索片段。",

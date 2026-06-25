@@ -40,6 +40,13 @@ export const evaluationSummary = {
     { label: "系统权限记忆", value: 30 },
     { label: "记忆边界用例", value: 40 },
   ],
+  failureReport: {
+    attributionSummary: [
+      { type: "sql", label: "SQL 问题", count: 1 },
+      { type: "memory", label: "记忆问题", count: 1 },
+    ],
+    severitySummary: { warn: 2 },
+  },
   issueCases: [
     {
       id: "sample-sql-filter-miss",
@@ -51,6 +58,32 @@ export const evaluationSummary = {
       riskLevel: "warn",
       riskScore: 65,
       reasons: ["示例：过滤值或上下文条件未命中时，应进入人工复核"],
+      primaryAttribution: {
+        type: "sql",
+        label: "SQL 问题",
+        severity: "warn",
+        reason: "过滤值或上下文条件未命中",
+        nextStep: "检查 NL2SQL schema prompt、短期滑动窗口和 expected_filters 对比结果。",
+        evidence: "static-sample",
+      },
+      attributions: [
+        {
+          type: "sql",
+          label: "SQL 问题",
+          severity: "warn",
+          reason: "过滤值或上下文条件未命中",
+          nextStep: "检查 NL2SQL schema prompt、短期滑动窗口和 expected_filters 对比结果。",
+          evidence: "static-sample",
+        },
+        {
+          type: "memory",
+          label: "记忆问题",
+          severity: "warn",
+          reason: "需要确认上一轮条件是否正确进入 Agent state",
+          nextStep: "检查 session_id、最近 N 轮消息和 memory_used 元数据。",
+          evidence: "static-sample",
+        },
+      ],
       questionSummary: "用户要求沿用上一轮设备条件，并追加频次过滤。",
       answerSummary: "需要核对 SQL 是否继承专业、运行部、设备位号和新增过滤条件。",
       sqlSummary: {

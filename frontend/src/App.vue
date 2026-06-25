@@ -93,6 +93,7 @@ const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
 const evaluation = ref(fallbackEvaluationSummary);
 const evaluationError = ref("");
+const evaluationFailureReport = ref(fallbackEvaluationSummary.failureReport || {});
 const evaluationCases = ref(fallbackEvaluationSummary.issueCases || []);
 const evaluationCaseError = ref("");
 const selectedEvaluationCaseId = ref(evaluationCases.value[0]?.id || null);
@@ -258,6 +259,7 @@ async function refreshEvaluation() {
   if (!isAdmin.value) {
     evaluation.value = fallbackEvaluationSummary;
     evaluationError.value = "";
+    evaluationFailureReport.value = fallbackEvaluationSummary.failureReport || {};
     evaluationCases.value = fallbackEvaluationSummary.issueCases || [];
     evaluationCaseError.value = "";
     evaluationRuns.value = fallbackEvaluationSummary.runs || [];
@@ -290,12 +292,14 @@ async function refreshEvaluation() {
   }
   try {
     const result = await getEvaluationFailures(8);
+    evaluationFailureReport.value = result;
     evaluationCases.value = result.cases || [];
     selectedEvaluationCaseId.value = evaluationCases.value[0]?.id || null;
     if (!evaluationCases.value.length) {
       evaluationCaseError.value = "当前 prediction 未发现失败或风险样例";
     }
   } catch (error) {
+    evaluationFailureReport.value = fallbackEvaluationSummary.failureReport || {};
     evaluationCases.value = fallbackEvaluationSummary.issueCases || [];
     selectedEvaluationCaseId.value = evaluationCases.value[0]?.id || null;
     evaluationCaseError.value = error.message || "评估样例加载失败，已使用静态示例";
@@ -615,6 +619,7 @@ function riskLabel(level) {
     fail: "失败",
     warn: "风险",
     pass: "抽样",
+    info: "提示",
   };
   return labels[level] || level || "未知";
 }
@@ -1441,6 +1446,20 @@ onMounted(async () => {
               </div>
               <p v-if="evaluationCaseError" class="eval-note warning">{{ evaluationCaseError }}</p>
 
+              <div
+                v-if="evaluationFailureReport.attributionSummary?.length"
+                class="attribution-summary"
+              >
+                <span
+                  v-for="item in evaluationFailureReport.attributionSummary"
+                  :key="item.type"
+                  class="attribution-chip"
+                >
+                  <strong>{{ item.label }}</strong>
+                  <small>{{ item.count }}</small>
+                </span>
+              </div>
+
               <div v-if="evaluationCases.length" class="eval-case-grid">
                 <div class="eval-case-list">
                   <button
@@ -1459,6 +1478,7 @@ onMounted(async () => {
                     <span class="eval-case-bottom">
                       <small>{{ item.scenario }}</small>
                       <small>{{ routeLabel(item.route) }}</small>
+                      <small>{{ item.primaryAttribution?.label || "未归因" }}</small>
                       <small>{{ formatDuration(item.latencyMs) }}</small>
                     </span>
                   </button>
@@ -1476,6 +1496,23 @@ onMounted(async () => {
                   </div>
                   <div class="eval-reason-list">
                     <span v-for="reason in selectedEvaluationCase.reasons" :key="reason">{{ reason }}</span>
+                  </div>
+                  <div
+                    v-if="selectedEvaluationCase.attributions?.length"
+                    class="attribution-list"
+                  >
+                    <div
+                      v-for="item in selectedEvaluationCase.attributions"
+                      :key="`${item.type}-${item.reason}`"
+                      class="attribution-item"
+                    >
+                      <span>
+                        <strong>{{ item.label }}</strong>
+                        <small :class="['risk-pill', item.severity]">{{ riskLabel(item.severity) }}</small>
+                      </span>
+                      <p>{{ item.reason }}</p>
+                      <small>{{ item.nextStep }}</small>
+                    </div>
                   </div>
                   <dl class="eval-case-fields">
                     <div>

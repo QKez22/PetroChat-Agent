@@ -63,6 +63,8 @@
 | 权限越界 | engineer 看到 admin 数据或高危操作 | 权限中间件、工具白名单 |
 | 延迟异常 | 单轮耗时超过阈值 | 工具调用次数、数据库查询、LLM 首 token |
 
+Phase 7.3 已把上述排查维度落到 `/api/evaluation/failures` 的结构化字段中。接口会返回整体 `attributionSummary`、`severitySummary`，并为每条样例返回 `primaryAttribution` 与 `attributions`，管理员前端可直接查看归因类型、触发原因和下一步排查建议。
+
 ## 5. 管理员看板展示点
 
 管理员前端目前可以展示三类评估信息：

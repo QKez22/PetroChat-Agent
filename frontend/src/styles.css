@@ -1220,6 +1220,76 @@ button {
   font-weight: 700;
 }
 
+.attribution-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.attribution-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1d252c;
+  font-size: 12px;
+}
+
+.attribution-chip small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e7f0ee;
+  color: #167668;
+  font-weight: 800;
+}
+
+.attribution-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.attribution-item {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.attribution-item span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.attribution-item p {
+  margin: 0;
+  color: #1d252c;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.attribution-item small {
+  color: #66737d;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .eval-case-fields {
   display: grid;
   gap: 10px;
@@ -1271,6 +1341,11 @@ button {
 .risk-pill.pass {
   background: #dff5ee;
   color: #0f766e;
+}
+
+.risk-pill.info {
+  background: #e7eef8;
+  color: #1d4ed8;
 }
 
 .admin-content {

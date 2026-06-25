@@ -130,7 +130,13 @@ def test_evaluation_failures_reads_prediction_samples(monkeypatch, tmp_path) -> 
     assert data["totalPredictions"] == 3
     assert data["returnedCount"] == 2
     assert data["failureCount"] == 2
+    attribution_counts = {item["type"]: item["count"] for item in data["attributionSummary"]}
+    assert attribution_counts["sql"] == 2
+    assert attribution_counts["memory"] == 3
+    assert data["severitySummary"]["fail"] == 2
     assert data["cases"][0]["riskLevel"] == "fail"
+    assert data["cases"][0]["primaryAttribution"]["type"] == "sql"
+    assert data["cases"][0]["attributions"][0]["nextStep"]
     assert data["cases"][0]["sqlSummary"]["present"] is False
     assert data["cases"][0]["traceHint"]["sessionId"] == "eval-d1"
     assert "sql" not in data["cases"][0]
