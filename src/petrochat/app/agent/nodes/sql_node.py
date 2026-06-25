@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 
 from ...core import AgentState
+from ...memory import augment_question_with_memory
 from ...report import render_report
 from ...sql import nl2sql
 
@@ -24,7 +25,8 @@ def sql_node(state: AgentState) -> dict:
     if not question:
         return {"messages": [AIMessage(content="请提供问题。")]}
 
-    result = nl2sql(question)
+    sql_question = augment_question_with_memory(question, state.get("long_term_context", ""))
+    result = nl2sql(sql_question)
 
     if not result.ok:
         parts = [f"❌ 查询失败（阶段：{result.stage}）"]

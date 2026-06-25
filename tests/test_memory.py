@@ -4,7 +4,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 
-from petrochat.app.memory import ConversationStore, LongTermMemoryStore
+from petrochat.app.memory import (
+    ConversationStore,
+    LongTermMemoryStore,
+    recall_long_term_memories,
+    write_memory_candidates,
+)
 
 
 def make_memory_test_engine() -> Engine:
@@ -159,3 +164,44 @@ def test_long_term_memory_store_reuses_existing_engine_data() -> None:
     assert len(memories) == 1
     assert memories[0].id == item.id
     assert memories[0].content == "默认统计运行中事务"
+
+
+def test_recall_long_term_memories_formats_context() -> None:
+    engine = make_memory_test_engine()
+    store = LongTermMemoryStore(engine)
+    item = store.create_memory(
+        user_id="1",
+        memory_type="query_filter",
+        content="默认统计炼油一部的运行中事务",
+        confidence=0.88,
+    )
+
+    memories, context = recall_long_term_memories(
+        user_id="1",
+        question="统计运行中事务数量",
+        store=store,
+    )
+
+    assert [m.id for m in memories] == [item.id]
+    assert f"[memory:{item.id}]" in context
+    assert "默认统计炼油一部" in context
+
+
+def test_write_memory_candidates_is_explicit_and_deduplicated() -> None:
+    engine = make_memory_test_engine()
+    store = LongTermMemoryStore(engine)
+    question = "以后默认查询炼油一部的运行中事务"
+
+    written = write_memory_candidates(user_id="1", question=question, route="sql", store=store)
+    duplicated = write_memory_candidates(user_id="1", question=question, route="sql", store=store)
+    ignored = write_memory_candidates(user_id="default", question=question, route="sql", store=store)
+
+    assert len(written) == 1
+    assert duplicated == []
+    assert ignored == []
+
+    memories = store.list_memories(user_id="1")
+    assert len(memories) == 1
+    assert memories[0].source == "agent_rule_extracted"
+    assert memories[0].memory_type == "query_filter"
+    assert memories[0].metadata["trigger"] == "explicit_memory_intent"

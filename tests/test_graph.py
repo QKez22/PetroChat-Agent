@@ -54,3 +54,20 @@ def test_initial_state_includes_short_term_history() -> None:
     assert s["session_id"] == "s1"
     assert s["user_id"] == "u1"
     assert len(s["short_term_messages"]) == 2
+
+
+def test_initial_state_includes_long_term_memory_context() -> None:
+    s = build_initial_state(
+        "统计事务",
+        user_id="1",
+        long_term_memories=[{"id": "101", "content": "默认看炼油一部"}],
+        long_term_context="1. [memory:101] 默认看炼油一部",
+    )
+    msgs = s["messages"]
+    assert len(msgs) == 3
+    assert isinstance(msgs[0], SystemMessage)
+    assert isinstance(msgs[1], SystemMessage)
+    assert isinstance(msgs[2], HumanMessage)
+    assert "用户长期记忆" in str(msgs[1].content)
+    assert s["long_term_memories"][0]["id"] == "101"
+    assert s["long_term_context"]

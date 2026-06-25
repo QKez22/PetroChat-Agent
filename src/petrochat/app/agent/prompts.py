@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
-
 # Phase 1: 纯 RAG 节点（已被 Phase 2 取代，保留作历史参考）
 QA_SYSTEM_PROMPT = """你是中国石化炼化企业的设备完整性管理专家。
 
 【规则】
 1. 只基于"参考资料"作答；无相关资料就回复"根据当前知识库，未找到相关条款的明确规定。"
 2. 答案中用方括号标注引用的章节号，如 [3.1.2]。
-3. 简洁专业，避免主观表达。"""
+3. 长期记忆只能用于理解用户偏好或默认条件，不能作为规范依据。
+4. 简洁专业，避免主观表达。"""
 
 QA_USER_PROMPT_TEMPLATE = """【参考资料】
 {context}

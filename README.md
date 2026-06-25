@@ -136,7 +136,10 @@ PetroChat-Agent/
 - 长期记忆数据模型：新增 MySQL `user_memory` / `memory_event`，用于保存用户偏好、常用业务条件和可审计记忆事件；缺表 SQL 见 `docs/sql/phase6_1_memory_tables.sql`。
 - 显式读写 API：新增 `/api/memory`，支持创建、列表、更新、禁用、软删除和查看审计事件。
 - 隔离边界：长期记忆按 `user_id` 隔离，带 `memory_type`、`source`、`confidence`、`status`、`expires_at` 和 `metadata`。
-- 阶段边界：当前只完成数据模型和显式管理接口，自动抽取记忆和 Agent 召回分别放到 Phase 6.2 / 6.3。
+- Agent 召回：调用前按 `user_id` 召回 active 长期记忆，和短期滑动窗口一起进入 LangGraph state；QA/SQL/General 三路节点都能看到记忆上下文。
+- 受控写入：问答结束后只在用户明确表达“记住、以后、默认、常用、我负责”等意图时写入候选记忆，默认用户 `default` 不写长期记忆。
+- 调用观测：非流式响应返回 `memory_used` / `memory_written`，SSE `meta` 返回 `long_term_count`、`long_term_memory_ids` 和 `memory_written_ids`。
+- 阶段边界：当前是规则版保守抽取和全文 active 记忆召回，尚未接入 LLM 高级抽取、记忆冲突合并和前端记忆治理页。
 
 当前路由策略：
 

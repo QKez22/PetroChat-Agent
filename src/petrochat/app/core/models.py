@@ -83,6 +83,8 @@ class ChatResponse(BaseModel):
     citations: list[str] = Field(default_factory=list)
     score: ScoreResult | None = None
     session_id: str | None = None
+    memory_used: list[str] = Field(default_factory=list)
+    memory_written: list[str] = Field(default_factory=list)
 
 
 class SessionSummary(BaseModel):

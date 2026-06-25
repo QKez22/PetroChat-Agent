@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     mysql_enum_sample_threshold: int = Field(default=30)
 
     short_term_turns: int = Field(default=6)
+    long_term_memory_limit: int = Field(default=5)
     eval_results_path: Path = Field(
         default=PROJECT_ROOT / "data" / "eval_results" / "golden_eval_summary.json"
     )

@@ -10,6 +10,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from loguru import logger
 
 from ..core import AgentState, get_settings
+from ..memory import build_memory_system_message
 from ..tools import ALL_TOOLS as LOCAL_TOOLS
 from .nodes.general_node import general_node
 from .nodes.qa_node import qa_node
@@ -67,9 +68,15 @@ def build_initial_state(
     session_id: str | None = None,
     user_id: str = "default",
     history: list[dict] | None = None,
+    long_term_memories: list[dict] | None = None,
+    long_term_context: str = "",
 ) -> dict:
     history = history or []
+    long_term_memories = long_term_memories or []
     messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)]
+    memory_msg = build_memory_system_message(long_term_context)
+    if memory_msg:
+        messages.append(memory_msg)
     for item in history:
         role = item.get("role")
         content = item.get("content") or ""
@@ -86,5 +93,7 @@ def build_initial_state(
         "user_id": user_id,
         "short_term_messages": history,
         "conversation_summary": "",
+        "long_term_memories": long_term_memories,
+        "long_term_context": long_term_context,
         "messages": messages,
     }

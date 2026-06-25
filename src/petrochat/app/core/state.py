@@ -19,6 +19,8 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     short_term_messages: list[dict[str, Any]]
     conversation_summary: str
+    long_term_memories: list[dict[str, Any]]
+    long_term_context: str
     retrieved: list[dict[str, Any]]
     answer: str
     citations: list[str]

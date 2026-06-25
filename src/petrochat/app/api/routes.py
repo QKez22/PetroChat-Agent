@@ -28,7 +28,12 @@ from ..core.models import (
     SessionDetail,
     SessionSummary,
 )
-from ..memory import StoredMessage, get_conversation_store
+from ..memory import (
+    StoredMessage,
+    get_conversation_store,
+    recall_long_term_memories,
+    write_memory_candidates,
+)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -74,6 +79,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
     settings = get_settings()
     session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
     history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
+    memories, memory_context = recall_long_term_memories(
+        user_id=req.user_id,
+        question=req.question,
+        limit=settings.long_term_memory_limit,
+    )
     started_at = time.perf_counter()
     try:
         result = await graph.ainvoke(
@@ -82,6 +92,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
                 session_id=session_id,
                 user_id=req.user_id,
                 history=history,
+                long_term_memories=[m.to_state() for m in memories],
+                long_term_context=memory_context,
             )
         )
     except Exception as e:
@@ -90,14 +102,23 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     answer, citations = _extract_answer_and_citations(result)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
+    route = _guess_route(result, answer)
     store.append_turn(
         session_id,
         req.question,
         answer,
-        route=_guess_route(result, answer),
+        route=route,
         latency_ms=latency_ms,
     )
-    return ChatResponse(answer=answer, citations=citations, score=None, session_id=session_id)
+    written = write_memory_candidates(user_id=req.user_id, question=req.question, route=route)
+    return ChatResponse(
+        answer=answer,
+        citations=citations,
+        score=None,
+        session_id=session_id,
+        memory_used=[m.id for m in memories],
+        memory_written=[m.id for m in written],
+    )
 
 
 # ============================================================
@@ -123,11 +144,18 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
     settings = get_settings()
     session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
     history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
+    memories, memory_context = recall_long_term_memories(
+        user_id=req.user_id,
+        question=req.question,
+        limit=settings.long_term_memory_limit,
+    )
     state = build_initial_state(
         req.question,
         session_id=session_id,
         user_id=req.user_id,
         history=history,
+        long_term_memories=[m.to_state() for m in memories],
+        long_term_context=memory_context,
     )
     final_answer = ""
     route = "general"
@@ -184,11 +212,15 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
                 route=route,
                 latency_ms=latency_ms,
             )
+        written = write_memory_candidates(user_id=req.user_id, question=req.question, route=route)
 
         meta: dict[str, Any] = {
             "citations": citations,
             "session_id": session_id,
             "short_term_count": len(history),
+            "long_term_count": len(memories),
+            "long_term_memory_ids": [m.id for m in memories],
+            "memory_written_ids": [m.id for m in written],
         }
 
         try:
