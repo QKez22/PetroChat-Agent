@@ -866,6 +866,119 @@ button {
   line-height: 1.2;
 }
 
+.evaluation-panel {
+  max-width: 1180px;
+  margin: 0 auto 16px;
+  padding: 14px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.evaluation-panel .panel-heading {
+  align-items: flex-start;
+}
+
+.evaluation-panel .panel-heading div {
+  min-width: 0;
+}
+
+.evaluation-panel .panel-heading h3 {
+  margin-bottom: 4px;
+}
+
+.eval-dataset {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.eval-dataset div,
+.eval-metric,
+.scenario-list div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f3f7f6;
+}
+
+.eval-dataset span,
+.eval-metric span,
+.scenario-list span {
+  display: block;
+  overflow: hidden;
+  color: #66737d;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-dataset strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.eval-content {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.eval-column {
+  min-width: 0;
+}
+
+.eval-column h4 {
+  margin: 0 0 8px;
+  color: #34444b;
+  font-size: 13px;
+}
+
+.eval-metric-list,
+.scenario-list {
+  display: grid;
+  gap: 8px;
+}
+
+.eval-metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+}
+
+.eval-metric strong,
+.scenario-list strong {
+  color: #1d252c;
+  font-size: 16px;
+}
+
+.eval-metric small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: #66737d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.eval-note {
+  margin: 12px 0 0;
+  color: #66737d;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .admin-content {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
@@ -1065,6 +1178,14 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .eval-dataset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .eval-content {
+    grid-template-columns: 1fr;
+  }
+
   .admin-content {
     grid-template-columns: 1fr;
   }
@@ -1100,6 +1221,7 @@ button {
 
   .metric-grid,
   .admin-card-grid,
+  .eval-dataset,
   .detail-grid {
     grid-template-columns: 1fr;
   }

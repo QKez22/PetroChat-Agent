@@ -37,6 +37,7 @@ import {
   sendChat,
   streamChat,
 } from "./services/chatStream";
+import { evaluationSummary } from "./data/evaluationSummary";
 
 const md = new MarkdownIt({
   html: false,
@@ -795,6 +796,75 @@ onMounted(async () => {
               <span>平均耗时</span>
               <strong>{{ formatDuration(adminStats.avgDuration) }}</strong>
             </div>
+          </section>
+
+          <section class="evaluation-panel">
+            <div class="panel-heading">
+              <div>
+                <h3>{{ evaluationSummary.title }}</h3>
+                <span>{{ evaluationSummary.generatedAt }} / {{ evaluationSummary.source }}</span>
+              </div>
+              <span class="status-pill done">Phase 5.5</span>
+            </div>
+
+            <div class="eval-dataset">
+              <div>
+                <span>对话组</span>
+                <strong>{{ evaluationSummary.dataset.dialogues }}</strong>
+              </div>
+              <div>
+                <span>总轮次</span>
+                <strong>{{ evaluationSummary.dataset.turns }}</strong>
+              </div>
+              <div>
+                <span>SQL 期望</span>
+                <strong>{{ evaluationSummary.dataset.sqlExpectations }}</strong>
+              </div>
+              <div>
+                <span>RAG 证据</span>
+                <strong>{{ evaluationSummary.dataset.ragEvidence }}</strong>
+              </div>
+              <div>
+                <span>记忆状态</span>
+                <strong>{{ evaluationSummary.dataset.memoryStates }}</strong>
+              </div>
+            </div>
+
+            <div class="eval-content">
+              <div class="eval-column">
+                <h4>合约指标</h4>
+                <div class="eval-metric-list">
+                  <div v-for="metric in evaluationSummary.contractMetrics" :key="metric.label" class="eval-metric">
+                    <span>{{ metric.label }}</span>
+                    <strong>{{ metric.value }}</strong>
+                    <small>{{ metric.detail }}</small>
+                  </div>
+                </div>
+              </div>
+
+              <div class="eval-column">
+                <h4>Prediction 指标</h4>
+                <div class="eval-metric-list">
+                  <div v-for="metric in evaluationSummary.predictionMetrics" :key="metric.label" class="eval-metric">
+                    <span>{{ metric.label }}</span>
+                    <strong>{{ metric.value }}</strong>
+                    <small>{{ metric.detail }}</small>
+                  </div>
+                </div>
+              </div>
+
+              <div class="eval-column">
+                <h4>场景分布</h4>
+                <div class="scenario-list">
+                  <div v-for="item in evaluationSummary.scenarioCounts" :key="item.label">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p class="eval-note">{{ evaluationSummary.note }}</p>
           </section>
 
           <section class="admin-content">

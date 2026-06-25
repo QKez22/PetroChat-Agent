@@ -1,0 +1,36 @@
+export const evaluationSummary = {
+  title: "Golden Set 评估摘要",
+  generatedAt: "2026-06-24 15:27",
+  source: "data/ducuments/agent_memory_golden_set",
+  note: "仅展示聚合指标；原始 Golden Set 与评估结果文件不提交远程。",
+  dataset: {
+    dialogues: 100,
+    turns: 390,
+    sqlExpectations: 140,
+    ragEvidence: 110,
+    memoryStates: 390,
+  },
+  contractMetrics: [
+    { label: "SQL 模板通过率", value: "100%", detail: "140 / 140" },
+    { label: "写操作违规", value: "0", detail: "UPDATE/DELETE/DROP 等" },
+    { label: "SELECT * 违规", value: "0", detail: "SQL 合约检查" },
+    { label: "需继承记忆轮次", value: "280", detail: "多轮条件继承" },
+    { label: "需忽略记忆轮次", value: "90", detail: "条件覆盖/清空" },
+    { label: "RAG 证据轮次", value: "110", detail: "规范证据召回" },
+  ],
+  predictionMetrics: [
+    { label: "Prediction 数量", value: "390", detail: "oracle 回放" },
+    { label: "SQL 校验率", value: "100%", detail: "sqlglot AST" },
+    { label: "SQL 表召回", value: "100%", detail: "expected_tables" },
+    { label: "SQL 过滤值召回", value: "100%", detail: "expected_filters" },
+    { label: "RAG Recall@5", value: "100%", detail: "oracle retrieved" },
+  ],
+  scenarioCounts: [
+    { label: "NL2SQL 条件记忆", value: 120 },
+    { label: "RAG + SQL 混合判断", value: 80 },
+    { label: "RAG 上下文记忆", value: 80 },
+    { label: "报表生成记忆", value: 40 },
+    { label: "系统权限记忆", value: 30 },
+    { label: "记忆边界用例", value: 40 },
+  ],
+};
