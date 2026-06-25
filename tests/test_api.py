@@ -50,15 +50,80 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "/api/auth/login" in paths
     assert "/api/auth/me" in paths
     assert "/api/evaluation/latest" in paths
+    assert "/api/evaluation/failures" in paths
     assert "post" in paths["/api/auth/login"]
     assert "get" in paths["/api/auth/me"]
     assert "get" in paths["/api/evaluation/latest"]
+    assert "get" in paths["/api/evaluation/failures"]
 
 
 def test_dev_login_returns_local_token(monkeypatch) -> None:
     from petrochat.app.core.config import get_settings
 
     monkeypatch.setenv("APP_ENV", "dev")
+    get_settings.cache_clear()
+
+
+def test_evaluation_failures_reads_prediction_samples(monkeypatch, tmp_path) -> None:
+    from petrochat.app.core.config import get_settings
+
+    prediction_path = tmp_path / "predictions.jsonl"
+    rows = [
+        {
+            "dialogue_id": "d1",
+            "turn_id": "1",
+            "mode": "agent",
+            "scenario_type": "nl2sql_condition_memory",
+            "question": "查询设备相关任务",
+            "route": "sql",
+            "answer": "",
+            "sql": "",
+            "status": "ok",
+            "latency_ms": 120,
+        },
+        {
+            "dialogue_id": "d2",
+            "turn_id": "2",
+            "mode": "agent",
+            "scenario_type": "rag_context_memory",
+            "question": "规范里怎么要求？",
+            "route": "qa",
+            "answer": "需要引用制度条款",
+            "retrieved": [],
+            "status": "ok",
+            "latency_ms": 20,
+        },
+        {
+            "dialogue_id": "d3",
+            "turn_id": "1",
+            "mode": "agent",
+            "scenario_type": "nl2sql_condition_memory",
+            "question": "只读查询",
+            "route": "sql",
+            "answer": "已查询",
+            "sql": "UPDATE affair_task SET status = 'done'",
+            "status": "ok",
+            "latency_ms": 10,
+        },
+    ]
+    prediction_path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EVAL_PREDICTIONS_PATH", str(prediction_path))
+    get_settings.cache_clear()
+
+    resp = client.get("/api/evaluation/failures", params={"limit": 2})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["totalPredictions"] == 3
+    assert data["returnedCount"] == 2
+    assert data["failureCount"] == 2
+    assert data["cases"][0]["riskLevel"] == "fail"
+    assert data["cases"][0]["sqlSummary"]["present"] is False
+    assert "sql" not in data["cases"][0]
+    assert any("SQL" in reason for reason in data["cases"][0]["reasons"])
+
     get_settings.cache_clear()
 
     resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})

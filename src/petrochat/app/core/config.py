@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     eval_results_path: Path = Field(
         default=PROJECT_ROOT / "data" / "eval_results" / "golden_eval_summary.json"
     )
+    eval_predictions_path: Path = Field(
+        default=PROJECT_ROOT / "data" / "eval_results" / "predictions.jsonl"
+    )
 
     @property
     def chroma_url(self) -> str:

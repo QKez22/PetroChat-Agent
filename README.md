@@ -127,6 +127,7 @@ PetroChat-Agent/
 - Golden Set 评估：`scripts/eval_golden_set.py` 读取私有 Golden Set，输出数据集画像、SQL 合约、RAG 证据和记忆合约指标。
 - Golden Set 回放：`scripts/replay_golden_set.py` 生成 prediction JSONL，默认 oracle 模式不调用模型，`--mode agent` 才真实调用 LangGraph。
 - 评估结果 API：`GET /api/evaluation/latest` 读取 `data/eval_results/golden_eval_summary.json`，只返回聚合指标；前端管理员看板优先使用 API，失败时回退静态摘要。
+- 失败样例回放：`GET /api/evaluation/failures` 读取 prediction JSONL，返回失败/风险样例的截断摘要、风险原因、SQL/RAG 概况，前端管理员页可点选查看。
 - 安全口径：生产环境默认不在 LangSmith 或普通日志中保留完整真实问题、完整 SQL、完整检索片段，只保留必要元数据、摘要、ID、指标和错误信息。
 
 当前路由策略：
@@ -274,6 +275,9 @@ uv run python scripts/replay_golden_set.py --mode oracle --evaluate
 
 # 查看最新评估摘要 API（需先生成 data/eval_results/golden_eval_summary.json）
 curl http://127.0.0.1:8000/api/evaluation/latest
+
+# 查看失败与风险样例摘要（需先生成 data/eval_results/predictions.jsonl）
+curl "http://127.0.0.1:8000/api/evaluation/failures?limit=8"
 ```
 
 ## 关键设计决策

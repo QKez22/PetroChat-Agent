@@ -8,14 +8,18 @@ retrieval snippets remain in ignored local files.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from ..core import get_settings
+from ..sql import validate_sql
 
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
+
+_TABLE_PATTERN = re.compile(r"\b(?:FROM|JOIN)\s+`?([a-zA-Z_][\w]*)`?", re.I)
 
 
 def _percent(value: float | int | None) -> str:
@@ -37,6 +41,163 @@ def _load_eval_file(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"invalid evaluation summary: {exc}") from exc
+
+
+def _load_prediction_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "prediction file not found; run "
+                "`uv run python scripts/replay_golden_set.py --mode oracle --evaluate` first"
+            ),
+        )
+
+    rows: list[dict[str, Any]] = []
+    current_line = 0
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            for line_no, line in enumerate(file, start=1):
+                current_line = line_no
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                row = json.loads(stripped)
+                if isinstance(row, dict):
+                    rows.append(row)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"invalid prediction JSONL at line {current_line}: {exc}",
+        ) from exc
+    return rows
+
+
+def _clip(value: Any, limit: int = 96) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit - 1]}…"
+
+
+def _sql_summary(sql: str) -> dict[str, Any]:
+    if not sql:
+        return {
+            "present": False,
+            "valid": False,
+            "reason": "未生成 SQL",
+            "tables": [],
+            "length": 0,
+        }
+
+    validation = validate_sql(sql)
+    tables = sorted({match.group(1) for match in _TABLE_PATTERN.finditer(sql)})
+    return {
+        "present": True,
+        "valid": validation.ok,
+        "reason": "" if validation.ok else validation.reason,
+        "tables": tables[:5],
+        "length": len(sql),
+    }
+
+
+def _retrieval_summary(retrieved: Any) -> dict[str, Any]:
+    rows = retrieved if isinstance(retrieved, list) else []
+    sources: list[str] = []
+    for item in rows:
+        if isinstance(item, dict):
+            metadata = item.get("metadata")
+            metadata_source = metadata.get("source") if isinstance(metadata, dict) else ""
+            source = item.get("source_doc") or item.get("source") or metadata_source
+        else:
+            source = str(item)
+        if source and source not in sources:
+            sources.append(str(source))
+    return {"count": len(rows), "sources": sources[:3]}
+
+
+def _risk_for_prediction(row: dict[str, Any]) -> tuple[int, str, list[str]]:
+    reasons: list[str] = []
+    score = 0
+    route = str(row.get("route") or "")
+    status = str(row.get("status") or "ok")
+    sql = str(row.get("sql") or "")
+    retrieval = _retrieval_summary(row.get("retrieved"))
+    latency_ms = int(row.get("latency_ms") or 0)
+
+    if status != "ok":
+        score = max(score, 100)
+        reasons.append(_clip(row.get("error") or f"prediction status={status}", 120))
+
+    if route == "sql" and not sql:
+        score = max(score, 90)
+        reasons.append("SQL 路由未生成 SQL")
+
+    if sql:
+        validation = validate_sql(sql)
+        if not validation.ok:
+            score = max(score, 85)
+            reasons.append(f"SQL 校验失败：{_clip(validation.reason, 90)}")
+
+    if route in {"qa", "rag"} and retrieval["count"] == 0:
+        score = max(score, 65)
+        reasons.append("RAG/QA 路由没有检索引用")
+
+    if not str(row.get("answer") or "").strip():
+        score = max(score, 55)
+        reasons.append("未生成回答摘要")
+
+    if latency_ms >= 15000:
+        score = max(score, 45)
+        reasons.append(f"高延迟：{latency_ms} ms")
+
+    if score >= 80:
+        level = "fail"
+    elif score >= 45:
+        level = "warn"
+    else:
+        level = "pass"
+        reasons.append("未触发显式失败，作为抽样复核样例")
+
+    return score, level, reasons
+
+
+def _to_failure_case(row: dict[str, Any]) -> dict[str, Any]:
+    score, level, reasons = _risk_for_prediction(row)
+    dialogue_id = str(row.get("dialogue_id") or "-")
+    turn_id = str(row.get("turn_id") or "-")
+    return {
+        "id": f"{dialogue_id}:{turn_id}",
+        "dialogue": f"{dialogue_id} / turn {turn_id}",
+        "scenario": row.get("scenario_type") or "-",
+        "route": row.get("route") or "-",
+        "mode": row.get("mode") or "-",
+        "status": row.get("status") or "-",
+        "riskLevel": level,
+        "riskScore": score,
+        "reasons": reasons,
+        "questionSummary": _clip(row.get("question"), 120),
+        "answerSummary": _clip(row.get("answer"), 140),
+        "sqlSummary": _sql_summary(str(row.get("sql") or "")),
+        "retrievalSummary": _retrieval_summary(row.get("retrieved")),
+        "latencyMs": int(row.get("latency_ms") or 0),
+    }
+
+
+def _failure_report(rows: list[dict[str, Any]], source_path: Path, limit: int) -> dict[str, Any]:
+    cases = [_to_failure_case(row) for row in rows]
+    cases.sort(key=lambda item: (item["riskScore"], item["latencyMs"]), reverse=True)
+    limited = cases[:limit]
+    return {
+        "title": "评估失败与风险样例",
+        "source": str(source_path),
+        "totalPredictions": len(rows),
+        "failureCount": sum(1 for item in cases if item["riskLevel"] == "fail"),
+        "warningCount": sum(1 for item in cases if item["riskLevel"] == "warn"),
+        "returnedCount": len(limited),
+        "cases": limited,
+        "note": "仅展示截断摘要和风险原因；不返回完整 SQL、完整问题或完整检索片段。",
+    }
 
 
 def _to_dashboard_summary(raw: dict[str, Any], source_path: Path) -> dict[str, Any]:
@@ -134,3 +295,12 @@ async def latest_evaluation() -> dict[str, Any]:
     path = get_settings().eval_results_path
     raw = _load_eval_file(path)
     return _to_dashboard_summary(raw, path)
+
+
+@router.get("/failures", summary="Golden Set 失败与风险样例")
+async def evaluation_failures(
+    limit: int = Query(default=8, ge=1, le=50),
+) -> dict[str, Any]:
+    path = get_settings().eval_predictions_path
+    rows = _load_prediction_rows(path)
+    return _failure_report(rows, path, limit)

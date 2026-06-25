@@ -30,6 +30,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   checkHealth,
   deleteSession,
+  getEvaluationFailures,
   getMe,
   getLatestEvaluation,
   getSession,
@@ -86,6 +87,9 @@ const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
 const evaluation = ref(fallbackEvaluationSummary);
 const evaluationError = ref("");
+const evaluationCases = ref(fallbackEvaluationSummary.issueCases || []);
+const evaluationCaseError = ref("");
+const selectedEvaluationCaseId = ref(evaluationCases.value[0]?.id || null);
 const isLoadingEvaluation = ref(false);
 
 const isAdmin = computed(() => currentUser.value?.role === "admin");
@@ -93,6 +97,11 @@ const roleLabel = computed(() => (isAdmin.value ? "管理员 admin" : "工程师
 const canSend = computed(() => Boolean(currentUser.value) && draft.value.trim().length > 0 && !isStreaming.value);
 const latestAssistant = computed(() => [...messages.value].reverse().find((m) => m.role === "assistant"));
 const selectedLog = computed(() => adminLogs.value.find((item) => item.id === selectedLogId.value) || adminLogs.value[0] || null);
+const selectedEvaluationCase = computed(() => (
+  evaluationCases.value.find((item) => item.id === selectedEvaluationCaseId.value)
+  || evaluationCases.value[0]
+  || null
+));
 const visibleLogs = computed(() => {
   if (isAdmin.value) {
     return adminLogs.value;
@@ -204,10 +213,13 @@ async function refreshEvaluation() {
   if (!isAdmin.value) {
     evaluation.value = fallbackEvaluationSummary;
     evaluationError.value = "";
+    evaluationCases.value = fallbackEvaluationSummary.issueCases || [];
+    evaluationCaseError.value = "";
     return;
   }
   isLoadingEvaluation.value = true;
   evaluationError.value = "";
+  evaluationCaseError.value = "";
   try {
     evaluation.value = await getLatestEvaluation();
   } catch (error) {
@@ -215,6 +227,18 @@ async function refreshEvaluation() {
     evaluationError.value = error.message || "评估摘要加载失败，已使用静态摘要";
   } finally {
     isLoadingEvaluation.value = false;
+  }
+  try {
+    const result = await getEvaluationFailures(8);
+    evaluationCases.value = result.cases || [];
+    selectedEvaluationCaseId.value = evaluationCases.value[0]?.id || null;
+    if (!evaluationCases.value.length) {
+      evaluationCaseError.value = "当前 prediction 未发现失败或风险样例";
+    }
+  } catch (error) {
+    evaluationCases.value = fallbackEvaluationSummary.issueCases || [];
+    selectedEvaluationCaseId.value = evaluationCases.value[0]?.id || null;
+    evaluationCaseError.value = error.message || "评估样例加载失败，已使用静态示例";
   }
 }
 
@@ -386,6 +410,15 @@ function routeLabel(route) {
     supervisor: "Supervisor",
   };
   return labels[route] || route;
+}
+
+function riskLabel(level) {
+  const labels = {
+    fail: "失败",
+    warn: "风险",
+    pass: "抽样",
+  };
+  return labels[level] || level || "未知";
 }
 
 function exportAdminLogs() {
@@ -899,6 +932,81 @@ onMounted(async () => {
 
             <p v-if="evaluationError" class="eval-note warning">{{ evaluationError }}</p>
             <p class="eval-note">{{ evaluation.note }}</p>
+
+            <div class="eval-case-section">
+              <div class="eval-case-header">
+                <div>
+                  <h4>失败与风险样例</h4>
+                  <span>来自 prediction JSONL 的截断摘要</span>
+                </div>
+                <strong>{{ evaluationCases.length }} 条</strong>
+              </div>
+              <p v-if="evaluationCaseError" class="eval-note warning">{{ evaluationCaseError }}</p>
+
+              <div v-if="evaluationCases.length" class="eval-case-grid">
+                <div class="eval-case-list">
+                  <button
+                    v-for="item in evaluationCases"
+                    :key="item.id"
+                    class="eval-case-row"
+                    :class="{ active: selectedEvaluationCase?.id === item.id }"
+                    type="button"
+                    @click="selectedEvaluationCaseId = item.id"
+                  >
+                    <span class="eval-case-top">
+                      <small :class="['risk-pill', item.riskLevel]">{{ riskLabel(item.riskLevel) }}</small>
+                      <strong>{{ item.dialogue }}</strong>
+                    </span>
+                    <span class="eval-case-question">{{ item.questionSummary }}</span>
+                    <span class="eval-case-bottom">
+                      <small>{{ item.scenario }}</small>
+                      <small>{{ routeLabel(item.route) }}</small>
+                      <small>{{ formatDuration(item.latencyMs) }}</small>
+                    </span>
+                  </button>
+                </div>
+
+                <div v-if="selectedEvaluationCase" class="eval-case-detail">
+                  <div class="eval-case-detail-head">
+                    <div>
+                      <h4>{{ selectedEvaluationCase.dialogue }}</h4>
+                      <span>{{ selectedEvaluationCase.mode }} / {{ selectedEvaluationCase.status }}</span>
+                    </div>
+                    <small :class="['risk-pill', selectedEvaluationCase.riskLevel]">
+                      {{ riskLabel(selectedEvaluationCase.riskLevel) }}
+                    </small>
+                  </div>
+                  <div class="eval-reason-list">
+                    <span v-for="reason in selectedEvaluationCase.reasons" :key="reason">{{ reason }}</span>
+                  </div>
+                  <dl class="eval-case-fields">
+                    <div>
+                      <dt>问题摘要</dt>
+                      <dd>{{ selectedEvaluationCase.questionSummary || "-" }}</dd>
+                    </div>
+                    <div>
+                      <dt>回答摘要</dt>
+                      <dd>{{ selectedEvaluationCase.answerSummary || "-" }}</dd>
+                    </div>
+                    <div>
+                      <dt>SQL 摘要</dt>
+                      <dd>
+                        {{ selectedEvaluationCase.sqlSummary.present ? "已生成" : "未生成" }} /
+                        {{ selectedEvaluationCase.sqlSummary.valid ? "校验通过" : "需复核" }} /
+                        {{ selectedEvaluationCase.sqlSummary.tables.join(", ") || "无表信息" }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>检索摘要</dt>
+                      <dd>
+                        {{ selectedEvaluationCase.retrievalSummary.count }} 条 /
+                        {{ selectedEvaluationCase.retrievalSummary.sources.join(", ") || "无来源摘要" }}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section class="admin-content">

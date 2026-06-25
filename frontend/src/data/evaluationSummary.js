@@ -33,4 +33,28 @@ export const evaluationSummary = {
     { label: "系统权限记忆", value: 30 },
     { label: "记忆边界用例", value: 40 },
   ],
+  issueCases: [
+    {
+      id: "sample-sql-filter-miss",
+      dialogue: "nl2sql_sample / turn 2",
+      scenario: "NL2SQL 条件记忆",
+      route: "sql",
+      mode: "static",
+      status: "review",
+      riskLevel: "warn",
+      riskScore: 65,
+      reasons: ["示例：过滤值或上下文条件未命中时，应进入人工复核"],
+      questionSummary: "用户要求沿用上一轮设备条件，并追加频次过滤。",
+      answerSummary: "需要核对 SQL 是否继承专业、运行部、设备位号和新增过滤条件。",
+      sqlSummary: {
+        present: true,
+        valid: true,
+        reason: "",
+        tables: ["affair_task"],
+        length: 0,
+      },
+      retrievalSummary: { count: 0, sources: [] },
+      latencyMs: 0,
+    },
+  ],
 };

@@ -990,6 +990,177 @@ button {
   color: #b7372f;
 }
 
+.eval-case-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e1e8e7;
+}
+
+.eval-case-header,
+.eval-case-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.eval-case-header h4,
+.eval-case-detail-head h4 {
+  margin: 0 0 4px;
+  color: #1d252c;
+  font-size: 13px;
+}
+
+.eval-case-header span,
+.eval-case-detail-head span {
+  color: #66737d;
+  font-size: 12px;
+}
+
+.eval-case-header strong {
+  flex: 0 0 auto;
+  color: #0f766e;
+}
+
+.eval-case-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.eval-case-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eval-case-row {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eval-case-row.active {
+  border-color: #0f766e;
+  box-shadow: inset 3px 0 0 #0f766e;
+}
+
+.eval-case-top,
+.eval-case-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eval-case-top strong,
+.eval-case-question,
+.eval-case-bottom small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eval-case-top strong {
+  min-width: 0;
+  color: #1d252c;
+  font-size: 13px;
+}
+
+.eval-case-question {
+  display: block;
+  margin: 7px 0;
+  color: #34444b;
+  font-size: 13px;
+}
+
+.eval-case-bottom {
+  color: #66737d;
+  font-size: 12px;
+}
+
+.eval-case-detail {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.eval-reason-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.eval-reason-list span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #fff4ed;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.eval-case-fields {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.eval-case-fields div {
+  min-width: 0;
+}
+
+.eval-case-fields dt {
+  color: #66737d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.eval-case-fields dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #1d252c;
+  font-size: 13px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+}
+
+.risk-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.risk-pill.fail {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.risk-pill.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.risk-pill.pass {
+  background: #dff5ee;
+  color: #0f766e;
+}
+
 .admin-content {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
@@ -1194,6 +1365,10 @@ button {
   }
 
   .eval-content {
+    grid-template-columns: 1fr;
+  }
+
+  .eval-case-grid {
     grid-template-columns: 1fr;
   }
 

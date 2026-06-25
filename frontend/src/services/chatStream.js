@@ -155,3 +155,9 @@ export async function getLatestEvaluation() {
   const response = await fetch(`${API_BASE}/api/evaluation/latest`);
   return readJson(response);
 }
+
+export async function getEvaluationFailures(limit = 8) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const response = await fetch(`${API_BASE}/api/evaluation/failures?${params.toString()}`);
+  return readJson(response);
+}
