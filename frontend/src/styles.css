@@ -894,6 +894,86 @@ button {
   line-height: 1.2;
 }
 
+.backend-observe-panel {
+  max-width: 1180px;
+  margin: 0 auto 16px;
+  padding: 14px;
+  border: 1px solid #d8e0df;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.backend-observe-panel .panel-heading {
+  align-items: flex-start;
+}
+
+.backend-observe-panel .panel-heading div {
+  min-width: 0;
+}
+
+.backend-observe-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.backend-observe-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.backend-observe-list h4 {
+  margin: 0;
+  color: #1d252c;
+  font-size: 13px;
+}
+
+.backend-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #e4ebe9;
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.backend-row span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.backend-row strong,
+.backend-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backend-row strong {
+  color: #1d252c;
+  font-size: 13px;
+}
+
+.backend-row small {
+  color: #66737d;
+  font-size: 12px;
+}
+
+.empty-inline {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px dashed #cdd9d6;
+  border-radius: 8px;
+  color: #66737d;
+  font-size: 12px;
+}
+
 .evaluation-panel {
   max-width: 1180px;
   margin: 0 auto 16px;
@@ -1787,6 +1867,10 @@ button {
 
   .admin-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .backend-observe-grid {
+    grid-template-columns: 1fr;
   }
 
   .eval-dataset {

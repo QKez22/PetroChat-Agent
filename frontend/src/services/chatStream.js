@@ -168,6 +168,36 @@ export async function getEvaluationRuns(limit = 10) {
   return readJson(response);
 }
 
+function adminParams(token, limit) {
+  const params = new URLSearchParams({ token: token || "" });
+  if (limit) {
+    params.set("limit", String(limit));
+  }
+  return params;
+}
+
+export async function getAdminOverview(token) {
+  const response = await fetch(`${API_BASE}/api/admin/overview?${adminParams(token).toString()}`);
+  return readJson(response);
+}
+
+export async function getAdminConversations(token, limit = 50) {
+  const response = await fetch(
+    `${API_BASE}/api/admin/conversations?${adminParams(token, limit).toString()}`,
+  );
+  return readJson(response);
+}
+
+export async function getAdminToolLogs(token, limit = 50) {
+  const response = await fetch(`${API_BASE}/api/admin/tool-logs?${adminParams(token, limit).toString()}`);
+  return readJson(response);
+}
+
+export async function getAdminAuditLogs(token, limit = 50) {
+  const response = await fetch(`${API_BASE}/api/admin/audit-logs?${adminParams(token, limit).toString()}`);
+  return readJson(response);
+}
+
 export async function listMemories(userId, options = {}) {
   const params = new URLSearchParams({
     user_id: userId || "default",

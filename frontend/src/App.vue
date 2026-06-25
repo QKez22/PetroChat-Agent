@@ -33,6 +33,10 @@ import {
   deleteMemory,
   deleteSession,
   disableMemory,
+  getAdminAuditLogs,
+  getAdminConversations,
+  getAdminOverview,
+  getAdminToolLogs,
   getEvaluationFailures,
   getEvaluationRuns,
   getMe,
@@ -60,7 +64,7 @@ const examples = [
   { icon: Gauge, label: "单位换算", text: "1 MPa 等于多少 psi？" },
 ];
 
-const adminCards = [
+const fallbackAdminCards = [
   { label: "用户与角色", value: "user 表 / authority_flag" },
   { label: "知识库管理", value: "文档 / Chroma / 重建" },
   { label: "Agent 配置", value: "提示词 / 模型参数 / 工具" },
@@ -91,6 +95,12 @@ const localToken = ref(localStorage.getItem(TOKEN_STORAGE_KEY) || "");
 const sessions = ref([]);
 const adminLogs = ref(loadAdminLogs());
 const selectedLogId = ref(adminLogs.value[0]?.id || null);
+const adminOverview = ref(null);
+const adminConversations = ref([]);
+const adminToolLogs = ref([]);
+const adminAuditLogs = ref([]);
+const adminBackendError = ref("");
+const isLoadingAdminBackend = ref(false);
 const evaluation = ref(fallbackEvaluationSummary);
 const evaluationError = ref("");
 const evaluationFailureReport = ref(fallbackEvaluationSummary.failureReport || {});
@@ -159,6 +169,17 @@ const adminStats = computed(() => {
     : 0;
   return { total, success, error, avgDuration };
 });
+const adminCards = computed(() => {
+  if (!adminOverview.value) {
+    return fallbackAdminCards;
+  }
+  return [
+    { label: "全局会话", value: `${adminOverview.value.conversationCount || 0} 个` },
+    { label: "消息记录", value: `${adminOverview.value.messageCount || 0} 条` },
+    { label: "工具调用", value: `${adminOverview.value.toolLogCount || 0} 条` },
+    { label: "审计日志", value: `${adminOverview.value.auditLogCount || 0} 条` },
+  ];
+});
 
 function createId() {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -199,6 +220,11 @@ function clearAuth() {
   memoryEvents.value = [];
   selectedMemoryId.value = null;
   memoryTargetUserId.value = "";
+  adminOverview.value = null;
+  adminConversations.value = [];
+  adminToolLogs.value = [];
+  adminAuditLogs.value = [];
+  adminBackendError.value = "";
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
   resetConversation();
@@ -303,6 +329,39 @@ async function refreshEvaluation() {
     evaluationCases.value = fallbackEvaluationSummary.issueCases || [];
     selectedEvaluationCaseId.value = evaluationCases.value[0]?.id || null;
     evaluationCaseError.value = error.message || "评估样例加载失败，已使用静态示例";
+  }
+}
+
+async function refreshAdminBackend() {
+  if (!isAdmin.value || !localToken.value) {
+    adminOverview.value = null;
+    adminConversations.value = [];
+    adminToolLogs.value = [];
+    adminAuditLogs.value = [];
+    adminBackendError.value = "";
+    return;
+  }
+  isLoadingAdminBackend.value = true;
+  adminBackendError.value = "";
+  try {
+    const [overview, conversations, toolLogs, auditLogs] = await Promise.all([
+      getAdminOverview(localToken.value),
+      getAdminConversations(localToken.value, 8),
+      getAdminToolLogs(localToken.value, 8),
+      getAdminAuditLogs(localToken.value, 8),
+    ]);
+    adminOverview.value = overview;
+    adminConversations.value = conversations;
+    adminToolLogs.value = toolLogs;
+    adminAuditLogs.value = auditLogs;
+  } catch (error) {
+    adminOverview.value = null;
+    adminConversations.value = [];
+    adminToolLogs.value = [];
+    adminAuditLogs.value = [];
+    adminBackendError.value = error.message || "管理员后端观测数据加载失败，已保留本地观测数据";
+  } finally {
+    isLoadingAdminBackend.value = false;
   }
 }
 
@@ -431,7 +490,7 @@ async function restoreAuth() {
     memoryTargetUserId.value = user.user_id;
     await refreshSessions();
     if (user.role === "admin") {
-      await refreshEvaluation();
+      await Promise.all([refreshEvaluation(), refreshAdminBackend()]);
     }
   } catch {
     clearAuth();
@@ -448,7 +507,7 @@ async function handleLogin() {
     activeView.value = "chat";
     await refreshSessions();
     if (result.user.role === "admin") {
-      await refreshEvaluation();
+      await Promise.all([refreshEvaluation(), refreshAdminBackend()]);
     }
   } catch (error) {
     loginError.value = error.message || "登录失败";
@@ -806,6 +865,10 @@ watch(currentUser, (user) => {
 watch(activeView, (view) => {
   if (view === "memory" && currentUser.value) {
     refreshMemories();
+  }
+  if (view === "admin" && isAdmin.value) {
+    refreshAdminBackend();
+    refreshEvaluation();
   }
 });
 
@@ -1308,6 +1371,54 @@ onMounted(async () => {
             <div class="metric-item">
               <span>平均耗时</span>
               <strong>{{ formatDuration(adminStats.avgDuration) }}</strong>
+            </div>
+          </section>
+
+          <section class="backend-observe-panel">
+            <div class="panel-heading">
+              <div>
+                <h3>后端观测</h3>
+                <span>{{ adminOverview?.source || "local fallback" }} / {{ adminOverview?.privacyNote || "后端不可用时仅展示本地记录" }}</span>
+              </div>
+              <button class="tiny-button" type="button" title="刷新后端观测" @click="refreshAdminBackend">
+                <RefreshCw :size="14" :class="{ spin: isLoadingAdminBackend }" />
+              </button>
+            </div>
+            <p v-if="adminBackendError" class="eval-note warning">{{ adminBackendError }}</p>
+            <div class="backend-observe-grid">
+              <div class="backend-observe-list">
+                <h4>全局会话</h4>
+                <div v-for="item in adminConversations" :key="item.id" class="backend-row">
+                  <span>
+                    <strong>{{ item.title || item.id }}</strong>
+                    <small>user {{ item.userId }} / {{ item.messageCount }} 条</small>
+                  </span>
+                  <small>{{ item.updatedAt }}</small>
+                </div>
+                <p v-if="!adminConversations.length" class="empty-inline">暂无后端会话摘要</p>
+              </div>
+              <div class="backend-observe-list">
+                <h4>工具调用</h4>
+                <div v-for="item in adminToolLogs" :key="item.id" class="backend-row">
+                  <span>
+                    <strong>{{ item.toolName || "unknown" }}</strong>
+                    <small>{{ item.inputSummary || item.outputSummary || item.status }}</small>
+                  </span>
+                  <small>{{ item.status || "-" }}</small>
+                </div>
+                <p v-if="!adminToolLogs.length" class="empty-inline">暂无工具调用记录</p>
+              </div>
+              <div class="backend-observe-list">
+                <h4>审计日志</h4>
+                <div v-for="item in adminAuditLogs" :key="item.id" class="backend-row">
+                  <span>
+                    <strong>{{ item.actionType || "audit" }}</strong>
+                    <small>{{ item.targetType }} {{ item.targetId }}</small>
+                  </span>
+                  <small>{{ item.createdAt }}</small>
+                </div>
+                <p v-if="!adminAuditLogs.length" class="empty-inline">暂无审计日志</p>
+              </div>
             </div>
           </section>
 

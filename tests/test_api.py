@@ -53,6 +53,10 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "/api/evaluation/latest" in paths
     assert "/api/evaluation/failures" in paths
     assert "/api/evaluation/runs" in paths
+    assert "/api/admin/overview" in paths
+    assert "/api/admin/conversations" in paths
+    assert "/api/admin/tool-logs" in paths
+    assert "/api/admin/audit-logs" in paths
     assert "/api/memory" in paths
     assert "/api/memory/{memory_id}" in paths
     assert "/api/memory/{memory_id}/disable" in paths
@@ -62,6 +66,10 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "get" in paths["/api/evaluation/latest"]
     assert "get" in paths["/api/evaluation/failures"]
     assert "get" in paths["/api/evaluation/runs"]
+    assert "get" in paths["/api/admin/overview"]
+    assert "get" in paths["/api/admin/conversations"]
+    assert "get" in paths["/api/admin/tool-logs"]
+    assert "get" in paths["/api/admin/audit-logs"]
     assert "get" in paths["/api/memory"]
     assert "post" in paths["/api/memory"]
     assert "patch" in paths["/api/memory/{memory_id}"]
@@ -200,6 +208,121 @@ def test_evaluation_runs_reads_local_summaries(monkeypatch, tmp_path) -> None:
     me_resp = client.get("/api/auth/me", params={"token": data["token"]})
     assert me_resp.status_code == 200
     assert me_resp.json()["username"] == "admin"
+
+
+def test_admin_observability_reads_mysql_backed_tables(monkeypatch) -> None:
+    from sqlalchemy import text
+
+    from petrochat.app.api import admin as admin_module
+    from petrochat.app.core.config import get_settings
+    from petrochat.app.memory import ConversationStore
+
+    engine = make_memory_test_engine()
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE agent_tool_log (
+                id BIGINT PRIMARY KEY,
+                conversation_id BIGINT,
+                user_id BIGINT,
+                tool_name VARCHAR(100),
+                input_summary TEXT,
+                output_summary TEXT,
+                status VARCHAR(50),
+                error_message TEXT,
+                created_at DATETIME NOT NULL,
+                expires_at DATETIME
+            );
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE agent_audit_log (
+                id BIGINT PRIMARY KEY,
+                user_id BIGINT,
+                action_type VARCHAR(100),
+                target_type VARCHAR(100),
+                target_id VARCHAR(100),
+                action_detail TEXT,
+                ip_address VARCHAR(100),
+                created_at DATETIME NOT NULL
+            );
+            """
+        )
+
+    store = ConversationStore(engine)
+    session_id = store.create_session(user_id="1", title="admin visible")
+    store.append_turn(session_id, "hello", "world")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO agent_tool_log(
+                    id, conversation_id, user_id, tool_name, input_summary,
+                    output_summary, status, error_message, created_at, expires_at
+                )
+                VALUES (
+                    1, :conversation_id, 1, 'retrieve_specs', :input_summary,
+                    :output_summary, 'ok', '', '2026-06-25 10:00:00', NULL
+                )
+                """
+            ),
+            {
+                "conversation_id": int(session_id),
+                "input_summary": "query=" + "x" * 160,
+                "output_summary": "top chunks hidden",
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO agent_audit_log(
+                    id, user_id, action_type, target_type, target_id,
+                    action_detail, ip_address, created_at
+                )
+                VALUES (
+                    1, 1, 'memory_disabled', 'user_memory', '99',
+                    :detail, '127.0.0.1', '2026-06-25 10:01:00'
+                )
+                """
+            ),
+            {"detail": "admin disabled stale memory"},
+        )
+
+    monkeypatch.setattr(admin_module, "get_engine", lambda: engine)
+    monkeypatch.setenv("APP_ENV", "dev")
+    get_settings.cache_clear()
+    login_resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin"})
+    token = login_resp.json()["token"]
+
+    overview = client.get("/api/admin/overview", params={"token": token})
+    assert overview.status_code == 200
+    assert overview.json()["conversationCount"] == 1
+    assert overview.json()["toolLogCount"] == 1
+    assert overview.json()["auditLogCount"] == 1
+
+    conversations = client.get("/api/admin/conversations", params={"token": token})
+    assert conversations.status_code == 200
+    assert conversations.json()[0]["id"] == session_id
+    assert conversations.json()[0]["messageCount"] == 2
+
+    tool_logs = client.get("/api/admin/tool-logs", params={"token": token})
+    assert tool_logs.status_code == 200
+    assert tool_logs.json()[0]["toolName"] == "retrieve_specs"
+    assert len(tool_logs.json()[0]["inputSummary"]) <= 120
+
+    audit_logs = client.get("/api/admin/audit-logs", params={"token": token})
+    assert audit_logs.status_code == 200
+    assert audit_logs.json()[0]["actionType"] == "memory_disabled"
+
+    engineer_token = client.post(
+        "/api/auth/login",
+        json={"username": "engineer", "password": "engineer"},
+    ).json()["token"]
+    denied = client.get("/api/admin/overview", params={"token": engineer_token})
+    assert denied.status_code == 403
+
+    get_settings.cache_clear()
 
 
 def test_delete_session_checks_user_id(monkeypatch) -> None:
