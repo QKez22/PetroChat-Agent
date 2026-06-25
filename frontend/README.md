@@ -5,6 +5,7 @@
 - 登录页：使用后端 `/api/auth/login`，前端 localStorage 保存本地演示 token。
 - 工程师对话台：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和图表。
 - 历史会话：左侧栏调用 `/api/sessions`，支持恢复和删除当前用户会话。
+- 长期记忆治理：调用 `/api/memory`，支持查看、手工写入、禁用、软删除和审计事件；管理员可输入目标 `user_id`，工程师默认管理自己的记忆。
 - 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要、评估运行历史、失败/风险样例和导出能力；评估区优先读取后端 `/api/evaluation/latest`、`/api/evaluation/runs` 与 `/api/evaluation/failures`，失败时回退静态摘要。
 
 ## 1. 版本要求
@@ -47,6 +48,12 @@ http://127.0.0.1:8000/docs
 ```
 
 如果需要 NL2SQL，请确认 `.env` 中已经配置 DeepSeek、DashScope 和 MySQL 只读账号。
+
+如果需要长期记忆治理，请确认 MySQL 中已创建 `user_memory` 和 `memory_event` 表；建表 SQL 位于：
+
+```text
+docs/sql/phase6_1_memory_tables.sql
+```
 
 ## 3. 启动前端
 
@@ -157,16 +164,18 @@ uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 
 ## 8. Git 提交命令
 
-提交信息需要带明确阶段序号。本轮评估展示收尾建议使用：
+提交信息需要带明确阶段序号。Phase 6.4 记忆治理建议使用：
 
 ```powershell
-git add docs/Phase5.9-评估展示报告.md `
-        docs/README.md `
-        docs/1.6-评测标准文档.md `
-        docs/v1.1-记忆评估与前端规划.md `
-        README.md `
-        frontend/README.md
+git add README.md `
+  docs/1.4-工具与API接口文档.md `
+  docs/1.5-权限与安全文档.md `
+  docs/v1.1-记忆评估与前端规划.md `
+  frontend/README.md `
+  frontend/src/App.vue `
+  frontend/src/services/chatStream.js `
+  frontend/src/styles.css
 
-git commit -m "docs(phase-5.9): 固化评估展示报告"
+git commit -m "feat(phase-6.4): 增加前端长期记忆治理页"
 git push origin main
 ```

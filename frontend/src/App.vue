@@ -29,12 +29,17 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import {
   checkHealth,
+  createMemory,
+  deleteMemory,
   deleteSession,
+  disableMemory,
   getEvaluationFailures,
   getEvaluationRuns,
   getMe,
   getLatestEvaluation,
+  getMemoryEvents,
   getSession,
+  listMemories,
   listSessions,
   login,
   sendChat,
@@ -95,6 +100,21 @@ const evaluationRuns = ref(fallbackEvaluationSummary.runs || []);
 const evaluationRunError = ref("");
 const selectedEvaluationRunId = ref(evaluationRuns.value[0]?.id || null);
 const isLoadingEvaluation = ref(false);
+const memoryTargetUserId = ref(currentUser.value?.user_id || "");
+const memoryStatusFilter = ref("active");
+const memories = ref([]);
+const memoryEvents = ref([]);
+const selectedMemoryId = ref(null);
+const memoryError = ref("");
+const memoryEventError = ref("");
+const isLoadingMemories = ref(false);
+const isLoadingMemoryEvents = ref(false);
+const memoryActionReason = ref("用户前端治理");
+const memoryForm = ref({
+  memory_type: "preference",
+  content: "",
+  confidence: 1,
+});
 
 const isAdmin = computed(() => currentUser.value?.role === "admin");
 const roleLabel = computed(() => (isAdmin.value ? "管理员 admin" : "工程师用户 engineer"));
@@ -111,6 +131,18 @@ const selectedEvaluationRun = computed(() => (
   || evaluationRuns.value[0]
   || null
 ));
+const selectedMemory = computed(() => (
+  memories.value.find((item) => item.id === selectedMemoryId.value)
+  || memories.value[0]
+  || null
+));
+const memoryStats = computed(() => {
+  const total = memories.value.length;
+  const active = memories.value.filter((item) => item.status === "active").length;
+  const disabled = memories.value.filter((item) => item.status === "disabled").length;
+  const deleted = memories.value.filter((item) => item.status === "deleted").length;
+  return { total, active, disabled, deleted };
+});
 const visibleLogs = computed(() => {
   if (isAdmin.value) {
     return adminLogs.value;
@@ -162,6 +194,10 @@ function clearAuth() {
   localToken.value = "";
   currentUser.value = null;
   sessions.value = [];
+  memories.value = [];
+  memoryEvents.value = [];
+  selectedMemoryId.value = null;
+  memoryTargetUserId.value = "";
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
   resetConversation();
@@ -266,6 +302,121 @@ async function refreshEvaluation() {
   }
 }
 
+async function refreshMemories() {
+  if (!currentUser.value) {
+    memories.value = [];
+    memoryEvents.value = [];
+    return;
+  }
+  const targetUserId = isAdmin.value ? memoryTargetUserId.value.trim() : currentUser.value.user_id;
+  if (!targetUserId) {
+    memoryError.value = "请输入目标用户 ID";
+    return;
+  }
+  isLoadingMemories.value = true;
+  memoryError.value = "";
+  try {
+    memories.value = await listMemories(targetUserId, {
+      status: memoryStatusFilter.value,
+      limit: 100,
+    });
+    selectedMemoryId.value = memories.value[0]?.id || null;
+    if (selectedMemoryId.value) {
+      await refreshMemoryEvents(selectedMemoryId.value);
+    } else {
+      memoryEvents.value = [];
+      memoryEventError.value = "";
+    }
+  } catch (error) {
+    memories.value = [];
+    memoryEvents.value = [];
+    selectedMemoryId.value = null;
+    memoryError.value = error.message || "长期记忆加载失败";
+  } finally {
+    isLoadingMemories.value = false;
+  }
+}
+
+async function refreshMemoryEvents(memoryId = selectedMemoryId.value) {
+  if (!memoryId) {
+    memoryEvents.value = [];
+    return;
+  }
+  isLoadingMemoryEvents.value = true;
+  memoryEventError.value = "";
+  try {
+    memoryEvents.value = await getMemoryEvents(memoryId, 50);
+  } catch (error) {
+    memoryEvents.value = [];
+    memoryEventError.value = error.message || "记忆审计加载失败";
+  } finally {
+    isLoadingMemoryEvents.value = false;
+  }
+}
+
+async function openMemory(memoryId) {
+  selectedMemoryId.value = memoryId;
+  await refreshMemoryEvents(memoryId);
+}
+
+async function submitMemory() {
+  if (!currentUser.value) {
+    return;
+  }
+  const targetUserId = isAdmin.value ? memoryTargetUserId.value.trim() : currentUser.value.user_id;
+  if (!targetUserId || !memoryForm.value.content.trim()) {
+    memoryError.value = "请填写目标用户和记忆正文";
+    return;
+  }
+  memoryError.value = "";
+  try {
+    const created = await createMemory({
+      user_id: targetUserId,
+      memory_type: memoryForm.value.memory_type,
+      content: memoryForm.value.content.trim(),
+      source: "frontend_manual",
+      confidence: Number(memoryForm.value.confidence),
+      metadata: {
+        channel: "frontend_memory_governance",
+        operator_role: currentUser.value.role,
+      },
+      actor_id: currentUser.value.user_id,
+    });
+    memoryForm.value.content = "";
+    await refreshMemories();
+    selectedMemoryId.value = created.id;
+    await refreshMemoryEvents(created.id);
+  } catch (error) {
+    memoryError.value = error.message || "长期记忆创建失败";
+  }
+}
+
+async function disableSelectedMemory() {
+  if (!selectedMemory.value || !currentUser.value) {
+    return;
+  }
+  memoryError.value = "";
+  try {
+    await disableMemory(selectedMemory.value.id, currentUser.value.user_id, memoryActionReason.value);
+    await refreshMemories();
+  } catch (error) {
+    memoryError.value = error.message || "长期记忆禁用失败";
+  }
+}
+
+async function deleteSelectedMemory() {
+  if (!selectedMemory.value || !currentUser.value) {
+    return;
+  }
+  memoryError.value = "";
+  try {
+    await deleteMemory(selectedMemory.value.id, currentUser.value.user_id, memoryActionReason.value);
+    await refreshMemories();
+  } catch (error) {
+    memoryError.value = error.message || "长期记忆删除失败";
+  }
+}
+
 async function restoreAuth() {
   if (!localToken.value) {
     return;
@@ -273,6 +424,7 @@ async function restoreAuth() {
   try {
     const user = await getMe(localToken.value);
     persistAuth(localToken.value, user);
+    memoryTargetUserId.value = user.user_id;
     await refreshSessions();
     if (user.role === "admin") {
       await refreshEvaluation();
@@ -288,6 +440,7 @@ async function handleLogin() {
   try {
     const result = await login(loginForm.value.username.trim(), loginForm.value.password);
     persistAuth(result.token, result.user);
+    memoryTargetUserId.value = result.user.user_id;
     activeView.value = "chat";
     await refreshSessions();
     if (result.user.role === "admin") {
@@ -351,6 +504,8 @@ function saveAdminTurn(question, assistant, startedAt, status) {
     citationCount: assistant.citations?.length || 0,
     citations: assistant.citations || [],
     chart: assistant.chart,
+    memoryUsed: assistant.memoryUsed || [],
+    memoryWritten: assistant.memoryWritten || [],
     events: assistant.events || [],
   };
   adminLogs.value = [item, ...adminLogs.value].slice(0, 100);
@@ -434,6 +589,25 @@ function routeLabel(route) {
     supervisor: "Supervisor",
   };
   return labels[route] || route;
+}
+
+function memoryTypeLabel(type) {
+  const labels = {
+    preference: "偏好",
+    query_filter: "默认条件",
+    business_context: "业务上下文",
+  };
+  return labels[type] || type;
+}
+
+function memoryStatusLabel(status) {
+  const labels = {
+    active: "启用",
+    disabled: "禁用",
+    deleted: "已删除",
+    all: "全部",
+  };
+  return labels[status] || status;
 }
 
 function riskLabel(level) {
@@ -532,6 +706,8 @@ async function sendQuestion() {
     events: [],
     citations: [],
     chart: null,
+    memoryUsed: [],
+    memoryWritten: [],
     status: "streaming",
   });
   scrollToBottom();
@@ -557,6 +733,8 @@ async function sendQuestion() {
             setCurrentSession(data.session_id);
           }
           assistant.citations = data.citations || [];
+          assistant.memoryUsed = data.long_term_memory_ids || [];
+          assistant.memoryWritten = data.memory_written_ids || [];
           if (data.chart_data_uri) {
             assistant.chart = {
               uri: data.chart_data_uri,
@@ -581,6 +759,8 @@ async function sendQuestion() {
       setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";
       assistant.citations = assistant.citations.length ? assistant.citations : fallback.citations || [];
+      assistant.memoryUsed = fallback.memory_used || [];
+      assistant.memoryWritten = fallback.memory_written || [];
     }
 
     assistant.status = "done";
@@ -592,6 +772,9 @@ async function sendQuestion() {
     isStreaming.value = false;
     activeController.value = null;
     await refreshSessions();
+    if (assistant.memoryWritten?.length && activeView.value === "memory") {
+      await refreshMemories();
+    }
     scrollToBottom();
   }
 }
@@ -610,7 +793,14 @@ function resetConversation() {
 
 watch(currentUser, (user) => {
   if (user) {
+    memoryTargetUserId.value = user.user_id;
     refreshSessions();
+  }
+});
+
+watch(activeView, (view) => {
+  if (view === "memory" && currentUser.value) {
+    refreshMemories();
   }
 });
 
@@ -658,6 +848,10 @@ onMounted(async () => {
         <button type="button" :class="{ active: activeView === 'chat' }" @click="activeView = 'chat'">
           <MessageSquareText :size="16" />
           对话
+        </button>
+        <button type="button" :class="{ active: activeView === 'memory' }" @click="activeView = 'memory'">
+          <Database :size="16" />
+          记忆
         </button>
         <button
           type="button"
@@ -821,6 +1015,11 @@ onMounted(async () => {
             <div v-if="message.citations?.length" class="citations">
               <span v-for="citation in message.citations" :key="citation">[{{ citation }}]</span>
             </div>
+
+            <div v-if="message.memoryUsed?.length || message.memoryWritten?.length" class="memory-badges">
+              <span v-for="id in message.memoryUsed" :key="`used-${id}`">使用 memory:{{ id }}</span>
+              <strong v-for="id in message.memoryWritten" :key="`written-${id}`">写入 memory:{{ id }}</strong>
+            </div>
           </div>
         </article>
       </div>
@@ -845,6 +1044,222 @@ onMounted(async () => {
           </button>
         </div>
       </form>
+
+      <template v-else-if="activeView === 'memory'">
+        <header class="topbar">
+          <div>
+            <h2>长期记忆治理</h2>
+            <p>查看、手工写入、禁用、软删除和审计用户长期记忆。</p>
+          </div>
+          <button class="secondary-button" type="button" @click="refreshMemories">
+            <RefreshCw :size="16" :class="{ spin: isLoadingMemories }" />
+            刷新
+          </button>
+        </header>
+
+        <div class="admin-body">
+          <section class="memory-toolbar">
+            <label>
+              <span>目标用户 ID</span>
+              <input
+                v-model="memoryTargetUserId"
+                :disabled="!isAdmin"
+                maxlength="64"
+                placeholder="user_id"
+              />
+            </label>
+            <label>
+              <span>状态</span>
+              <select v-model="memoryStatusFilter" @change="refreshMemories">
+                <option value="active">启用</option>
+                <option value="disabled">禁用</option>
+                <option value="deleted">已删除</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+            <label>
+              <span>操作原因</span>
+              <input v-model="memoryActionReason" maxlength="200" />
+            </label>
+          </section>
+
+          <section class="metric-grid memory-metrics">
+            <div class="metric-item">
+              <span>当前列表</span>
+              <strong>{{ memoryStats.total }}</strong>
+            </div>
+            <div class="metric-item">
+              <span>启用</span>
+              <strong>{{ memoryStats.active }}</strong>
+            </div>
+            <div class="metric-item">
+              <span>禁用</span>
+              <strong>{{ memoryStats.disabled }}</strong>
+            </div>
+            <div class="metric-item">
+              <span>已删除</span>
+              <strong>{{ memoryStats.deleted }}</strong>
+            </div>
+          </section>
+
+          <section class="memory-create-panel">
+            <div class="panel-heading">
+              <div>
+                <h3>手工写入记忆</h3>
+                <span>source=frontend_manual，会写入 memory_event</span>
+              </div>
+              <button class="secondary-button" type="button" @click="submitMemory">
+                <Sparkles :size="16" />
+                写入
+              </button>
+            </div>
+
+            <div class="memory-form">
+              <label>
+                <span>类型</span>
+                <select v-model="memoryForm.memory_type">
+                  <option value="preference">偏好</option>
+                  <option value="query_filter">默认条件</option>
+                  <option value="business_context">业务上下文</option>
+                </select>
+              </label>
+              <label>
+                <span>置信度</span>
+                <input v-model.number="memoryForm.confidence" max="1" min="0" step="0.05" type="number" />
+              </label>
+              <label class="memory-content-input">
+                <span>正文</span>
+                <textarea
+                  v-model="memoryForm.content"
+                  maxlength="1000"
+                  rows="3"
+                  placeholder="例如：用户默认关注炼油一部的运行中事务"
+                ></textarea>
+              </label>
+            </div>
+          </section>
+
+          <p v-if="memoryError" class="eval-note warning">{{ memoryError }}</p>
+
+          <section class="memory-content">
+            <div class="memory-list">
+              <div class="panel-heading">
+                <h3>长期记忆</h3>
+                <span>{{ memories.length }} 条</span>
+              </div>
+
+              <button
+                v-for="item in memories"
+                :key="item.id"
+                class="memory-row"
+                :class="{ active: selectedMemory?.id === item.id }"
+                type="button"
+                @click="openMemory(item.id)"
+              >
+                <span class="memory-row-top">
+                  <strong>{{ memoryTypeLabel(item.memory_type) }}</strong>
+                  <small :class="['status-pill', item.status]">{{ memoryStatusLabel(item.status) }}</small>
+                </span>
+                <span class="memory-text">{{ item.content }}</span>
+                <span class="memory-row-bottom">
+                  <small>memory:{{ item.id }}</small>
+                  <small>{{ Number(item.confidence).toFixed(2) }}</small>
+                  <small>{{ formatTime(item.updated_at) }}</small>
+                </span>
+              </button>
+
+              <div v-if="!isLoadingMemories && !memories.length" class="admin-empty">
+                <Database :size="34" />
+                <p>暂无长期记忆。</p>
+              </div>
+            </div>
+
+            <article class="memory-detail">
+              <template v-if="selectedMemory">
+                <div class="panel-heading">
+                  <div>
+                    <h3>记忆详情</h3>
+                    <span>memory:{{ selectedMemory.id }}</span>
+                  </div>
+                  <div class="admin-actions">
+                    <button
+                      class="secondary-button"
+                      type="button"
+                      :disabled="selectedMemory.status !== 'active'"
+                      @click="disableSelectedMemory"
+                    >
+                      禁用
+                    </button>
+                    <button
+                      class="danger-button"
+                      type="button"
+                      :disabled="selectedMemory.status === 'deleted'"
+                      @click="deleteSelectedMemory"
+                    >
+                      <Trash2 :size="16" />
+                      删除
+                    </button>
+                  </div>
+                </div>
+
+                <dl class="detail-grid memory-detail-grid">
+                  <div>
+                    <dt>类型</dt>
+                    <dd>{{ memoryTypeLabel(selectedMemory.memory_type) }}</dd>
+                  </div>
+                  <div>
+                    <dt>状态</dt>
+                    <dd>{{ memoryStatusLabel(selectedMemory.status) }}</dd>
+                  </div>
+                  <div>
+                    <dt>来源</dt>
+                    <dd>{{ selectedMemory.source }}</dd>
+                  </div>
+                  <div>
+                    <dt>置信度</dt>
+                    <dd>{{ Number(selectedMemory.confidence).toFixed(2) }}</dd>
+                  </div>
+                </dl>
+
+                <section class="detail-section">
+                  <h4>记忆正文</h4>
+                  <p>{{ selectedMemory.content }}</p>
+                </section>
+
+                <section class="detail-section">
+                  <h4>元数据</h4>
+                  <pre class="json-panel">{{ JSON.stringify(selectedMemory.metadata, null, 2) }}</pre>
+                </section>
+
+                <section class="detail-section">
+                  <div class="panel-heading">
+                    <h4>审计事件</h4>
+                    <button class="tiny-button" type="button" title="刷新审计" @click="refreshMemoryEvents()">
+                      <RefreshCw :size="14" :class="{ spin: isLoadingMemoryEvents }" />
+                    </button>
+                  </div>
+                  <p v-if="memoryEventError" class="eval-note warning">{{ memoryEventError }}</p>
+                  <div class="memory-event-list">
+                    <div v-for="event in memoryEvents" :key="event.id" class="memory-event">
+                      <span>
+                        <strong>{{ event.event_type }}</strong>
+                        <small>{{ formatTime(event.created_at) }}</small>
+                      </span>
+                      <p>{{ event.reason || "-" }}</p>
+                      <small>actor: {{ event.actor_id || "-" }}</small>
+                    </div>
+                  </div>
+                </section>
+              </template>
+
+              <div v-else class="admin-empty">
+                <Database :size="34" />
+                <p>选择一条长期记忆查看详情。</p>
+              </div>
+            </article>
+          </section>
+        </div>
+      </template>
 
       <template v-else>
         <header class="topbar">
@@ -1153,6 +1568,14 @@ onMounted(async () => {
                     <dt>工具事件</dt>
                     <dd>{{ selectedLog.eventCount }}</dd>
                   </div>
+                  <div>
+                    <dt>使用记忆</dt>
+                    <dd>{{ selectedLog.memoryUsed?.length || 0 }}</dd>
+                  </div>
+                  <div>
+                    <dt>写入记忆</dt>
+                    <dd>{{ selectedLog.memoryWritten?.length || 0 }}</dd>
+                  </div>
                 </dl>
 
                 <section class="detail-section">
@@ -1176,6 +1599,19 @@ onMounted(async () => {
                         <p v-if="event.preview">{{ event.preview }}</p>
                       </div>
                     </div>
+                  </div>
+                </section>
+
+                <section
+                  v-if="selectedLog.memoryUsed?.length || selectedLog.memoryWritten?.length"
+                  class="detail-section"
+                >
+                  <h4>长期记忆</h4>
+                  <div class="memory-badges">
+                    <span v-for="id in selectedLog.memoryUsed" :key="`log-used-${id}`">使用 memory:{{ id }}</span>
+                    <strong v-for="id in selectedLog.memoryWritten" :key="`log-written-${id}`">
+                      写入 memory:{{ id }}
+                    </strong>
                   </div>
                 </section>
 

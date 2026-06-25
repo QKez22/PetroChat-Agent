@@ -139,7 +139,8 @@ PetroChat-Agent/
 - Agent 召回：调用前按 `user_id` 召回 active 长期记忆，和短期滑动窗口一起进入 LangGraph state；QA/SQL/General 三路节点都能看到记忆上下文。
 - 受控写入：问答结束后只在用户明确表达“记住、以后、默认、常用、我负责”等意图时写入候选记忆，默认用户 `default` 不写长期记忆。
 - 调用观测：非流式响应返回 `memory_used` / `memory_written`，SSE `meta` 返回 `long_term_count`、`long_term_memory_ids` 和 `memory_written_ids`。
-- 阶段边界：当前是规则版保守抽取和全文 active 记忆召回，尚未接入 LLM 高级抽取、记忆冲突合并和前端记忆治理页。
+- 前端治理：Vue3 新增“记忆”工作区，支持查看长期记忆、手工写入、禁用、软删除和查看审计事件；管理员可输入目标 `user_id`，工程师默认管理自己的记忆。
+- 阶段边界：当前是规则版保守抽取、active 记忆召回和前端治理基础版，尚未接入 LLM 高级抽取、记忆冲突合并和生产级服务端鉴权。
 
 当前路由策略：
 
@@ -252,10 +253,11 @@ pnpm dev
 
 打开 [http://localhost:5173](http://localhost:5173) 使用对话工作台。
 
-前端包含登录、对话和管理员视图：
+前端包含登录、对话、记忆和管理员视图：
 
 - 登录：优先使用数据库 `user` 表账号；非生产环境无法连接 MySQL 时可用 `admin/admin` 或 `engineer/engineer` 演示账号。
 - 对话：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和报表图。
+- 记忆：调用 `/api/memory`，查看长期记忆、手工写入、禁用、软删除和审计事件；对话气泡展示本轮使用/写入的记忆 ID。
 - 管理员：登录为 `admin` 后可见，用浏览器 `localStorage` 记录最近 100 轮问答，查看路由、耗时、状态、工具调用、引用、图表和 Golden Set 评估摘要，并支持摘要 JSON 导出。
 - 会话：前端保存当前 `session_id`，后端用 MySQL 应用表持久化消息，并按最近 N 轮加载短期滑动窗口；左侧历史会话列表可恢复和删除当前用户会话。
 

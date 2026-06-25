@@ -167,3 +167,56 @@ export async function getEvaluationRuns(limit = 10) {
   const response = await fetch(`${API_BASE}/api/evaluation/runs?${params.toString()}`);
   return readJson(response);
 }
+
+export async function listMemories(userId, options = {}) {
+  const params = new URLSearchParams({
+    user_id: userId || "default",
+    status: options.status || "active",
+    limit: String(options.limit || 50),
+  });
+  if (options.memoryType) {
+    params.set("memory_type", options.memoryType);
+  }
+  const response = await fetch(`${API_BASE}/api/memory?${params.toString()}`);
+  return readJson(response);
+}
+
+export async function createMemory(payload) {
+  const response = await fetch(`${API_BASE}/api/memory`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readJson(response);
+}
+
+export async function disableMemory(memoryId, actorId, reason) {
+  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/disable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor_id: actorId || null,
+      reason: reason || "frontend disable",
+    }),
+  });
+  return readJson(response);
+}
+
+export async function deleteMemory(memoryId, actorId, reason) {
+  const params = new URLSearchParams({
+    reason: reason || "frontend delete",
+  });
+  if (actorId) {
+    params.set("actor_id", actorId);
+  }
+  const response = await fetch(`${API_BASE}/api/memory/${memoryId}?${params.toString()}`, {
+    method: "DELETE",
+  });
+  return readJson(response);
+}
+
+export async function getMemoryEvents(memoryId, limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/events?${params.toString()}`);
+  return readJson(response);
+}
