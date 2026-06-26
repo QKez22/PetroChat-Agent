@@ -791,6 +791,13 @@ function riskLabel(level) {
   return labels[level] || level || "未知";
 }
 
+function gateRiskClass(status) {
+  if (status === "profile-only") {
+    return "info";
+  }
+  return status || "info";
+}
+
 function runStatusLabel(status) {
   const labels = {
     scored: "已评分",
@@ -1629,6 +1636,28 @@ onMounted(async () => {
               </div>
             </div>
 
+            <div v-if="evaluation.qualityGate" class="quality-gate-panel">
+              <div>
+                <span>质量门禁</span>
+                <strong>{{ evaluation.qualityGate.label || evaluation.qualityGate.status }}</strong>
+                <small>{{ evaluation.qualityGate.summary }}</small>
+              </div>
+              <small :class="['risk-pill', gateRiskClass(evaluation.qualityGate.status)]">
+                {{ evaluation.qualityGate.failedCount || 0 }} 失败 / {{ evaluation.qualityGate.warningCount || 0 }} 预警
+              </small>
+              <div
+                v-if="evaluation.qualityGate.checks?.some((item) => item.status !== 'pass' && item.status !== 'skip')"
+                class="quality-gate-checks"
+              >
+                <span
+                  v-for="item in evaluation.qualityGate.checks.filter((check) => check.status !== 'pass' && check.status !== 'skip').slice(0, 5)"
+                  :key="item.id"
+                >
+                  {{ item.label }} {{ item.operator }} {{ item.target }}
+                </span>
+              </div>
+            </div>
+
             <div class="eval-content">
               <div class="eval-column">
                 <h4>合约指标</h4>
@@ -1689,7 +1718,15 @@ onMounted(async () => {
                     <strong>{{ item.label }}</strong>
                     <small>{{ item.generatedAt }}</small>
                   </span>
-                  <small class="status-pill done">{{ runStatusLabel(item.status) }}</small>
+                  <span class="eval-run-statuses">
+                    <small class="status-pill done">{{ runStatusLabel(item.status) }}</small>
+                    <small
+                      v-if="item.qualityGate"
+                      :class="['risk-pill', gateRiskClass(item.qualityGate.status)]"
+                    >
+                      门禁{{ item.qualityGate.label || item.qualityGate.status }}
+                    </small>
+                  </span>
                   <span>
                     <small>{{ item.dataset.dialogues }} 组 / {{ item.dataset.turns }} 轮</small>
                     <small>SQL {{ item.metrics.sqlValidationRate }} · RAG {{ item.metrics.ragRecallAt5 }}</small>

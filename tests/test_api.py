@@ -234,6 +234,8 @@ def test_evaluation_runs_reads_local_summaries(monkeypatch, tmp_path) -> None:
     assert run["metrics"]["sqlValidationRate"] == "80%"
     assert run["artifacts"]["summary"] is True
     assert run["artifacts"]["predictions"] is True
+    assert run["qualityGate"]["status"] == "fail"
+    assert run["qualityGate"]["failedCount"] == 1
     assert run["traceHint"]["enabled"] is True
     assert run["traceHint"]["project"] == "petrochat-test"
     assert run["traceHint"]["runId"] == "smoke-summary-1"
@@ -552,6 +554,8 @@ def test_latest_evaluation_reads_summary(monkeypatch, tmp_path) -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data["dataset"]["dialogues"] == 2
+    assert data["qualityGate"]["status"] == "fail"
+    assert data["qualityGate"]["failedCount"] >= 1
     assert data["contractMetrics"][0]["value"] == "100%"
     prediction_by_label = {item["label"]: item for item in data["predictionMetrics"]}
     assert prediction_by_label["Agent 成功率"]["value"] == "88%"

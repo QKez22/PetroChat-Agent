@@ -86,6 +86,7 @@ PetroChat-Agent/
 | 3 | MCP Server | 完成 | `v0.3-mcp` |
 | 4 | Supervisor 多 Agent + NL2SQL + 报表 | 完成 | `v1.0-multiagent` |
 | 5 | 记忆管理 + Vue3 登录/RBAC 基础版 | 进行中 | 未 tag |
+| 10.1 | 评估质量门禁与管理员展示 | 完成基础版 | 未 tag |
 
 ### Phase 1: RAG 问答
 
@@ -129,6 +130,7 @@ PetroChat-Agent/
 - 评估结果 API：`GET /api/evaluation/latest` 读取 `data/eval_results/golden_eval_summary.json`，只返回聚合指标；前端管理员看板优先使用 API，失败时回退静态摘要。
 - 失败样例回放与归因：`GET /api/evaluation/failures` 读取 prediction JSONL，返回失败/风险样例的截断摘要、SQL/RAG 概况、归因分布和单条排查建议，前端管理员页可点选查看。
 - 评估运行历史：`GET /api/evaluation/runs` 扫描本地评估摘要文件，展示评估批次、产物状态和 LangSmith trace 查询线索。
+- 质量门禁：评估摘要新增 `qualityGate`，按 Agent 成功率、SQL 校验率、SQL 合约准确率、RAG Recall@5/MRR、忠实性代理指标和 Memory Hit Rate 输出 pass/warn/fail。
 - 安全口径：生产环境默认不在 LangSmith 或普通日志中保留完整真实问题、完整 SQL、完整检索片段，只保留必要元数据、摘要、ID、指标和错误信息。
 
 ### Phase 6: 长期记忆（进行中）
@@ -315,6 +317,9 @@ uv run python scripts/replay_golden_set.py --mode agent --scenario-type nl2sql_c
 # 评估输出已包含 Agent 成功率、SQL 合约准确率、RAG MRR、证据覆盖率、忠实性代理指标和 Memory Hit Rate
 uv run python scripts/eval_golden_set.py --prediction-path data/eval_results/predictions.jsonl
 
+# 质量门禁失败时返回退出码 2，可用于 CI 或提交前检查
+uv run python scripts/eval_golden_set.py --prediction-path data/eval_results/predictions.jsonl --fail-on-gate
+
 # 查看最新评估摘要 API（需先生成 data/eval_results/golden_eval_summary.json）
 curl http://127.0.0.1:8000/api/evaluation/latest
 
@@ -402,6 +407,17 @@ uv run python scripts/cleanup_retention.py --execute --actor-id 1 --reason "mont
 ```
 
 详细说明见 [docs/Phase9.2-数据保留与清理任务.md](docs/Phase9.2-数据保留与清理任务.md)。
+
+## Phase 10.1 评估质量门禁
+
+新增 Golden Set 质量门禁基础版：离线评估结果会生成 `quality_gate`，后端 `/api/evaluation/latest` 暴露 `qualityGate`，管理员前端展示质量门禁状态和未通过检查项。默认阈值可通过 `.env` 调整，适合区分 oracle 管道验证、真实 Agent 小批量回放和后续 CI 回归。
+
+```powershell
+uv run python scripts/eval_golden_set.py --prediction-path data/eval_results/predictions.jsonl --fail-on-gate
+curl http://127.0.0.1:8000/api/evaluation/latest
+```
+
+详细说明见 [docs/Phase10.1-评估质量门禁.md](docs/Phase10.1-评估质量门禁.md)。
 
 ## License
 

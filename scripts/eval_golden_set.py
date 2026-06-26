@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from petrochat.app.core.config import PROJECT_ROOT
@@ -31,9 +32,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--predictions",
+        "--prediction-path",
         type=Path,
         default=None,
         help="Optional JSONL file with agent predictions for metric scoring.",
+    )
+    parser.add_argument(
+        "--fail-on-gate",
+        action="store_true",
+        help="Exit with code 2 when the quality gate status is fail.",
     )
     parser.add_argument(
         "--print-json",
@@ -58,13 +65,17 @@ def main() -> None:
     sql = result["sql_contract"]
     memory = result["memory_contract"]
     rag = result["rag_contract"]
+    gate = result["quality_gate"]
     print("Golden Set evaluation complete")
     print(f"- dialogues: {profile['dialogue_count']}")
     print(f"- turns: {profile['turn_count']}")
     print(f"- SQL template valid rate: {sql['template_valid_rate']}")
     print(f"- memory use turns: {memory['requires_memory_use_turns']}")
     print(f"- RAG evidence rows: {rag['evidence_count']}")
+    print(f"- quality gate: {gate['status']} ({gate['label']})")
     print(f"- outputs: {result['outputs']['json']}")
+    if args.fail_on_gate and gate["status"] == "fail":
+        sys.exit(2)
 
 
 if __name__ == "__main__":

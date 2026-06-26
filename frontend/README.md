@@ -6,7 +6,7 @@
 - 工程师对话台：消费 `POST /api/chat/stream`，渲染 Markdown、工具事件、引用和图表。
 - 历史会话：左侧栏调用 `/api/sessions`，支持恢复和删除当前用户会话。
 - 长期记忆治理：调用 `/api/memory`，支持查看、手工写入、禁用、软删除和审计事件；管理员可输入目标 `user_id`，工程师默认管理自己的记忆。
-- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要、评估运行历史、失败/风险样例和导出能力；评估区优先读取后端 `/api/evaluation/latest`、`/api/evaluation/runs` 与 `/api/evaluation/failures`，失败时回退静态摘要。
+- 管理员工作台：按 `admin` 角色展示本地问答观测记录、工具调用、路由、耗时、Golden Set 评估摘要、质量门禁、评估运行历史、失败/风险样例和导出能力；评估区优先读取后端 `/api/evaluation/latest`、`/api/evaluation/runs` 与 `/api/evaluation/failures`，失败时回退静态摘要。
 
 ## 1. 版本要求
 
@@ -212,3 +212,7 @@ Authorization: Bearer <token>
 ```
 
 旧版 `?token=` 调用仍由后端兼容，但前端不再把 token 放进 URL query。
+
+## Phase 10.1 评估质量门禁
+
+管理员评估面板会读取 `/api/evaluation/latest` 的 `qualityGate`，展示 pass / warn / fail / profile-only 状态，并列出最多 5 项未通过或预警检查。评估运行历史中的每个批次也会显示对应门禁状态。

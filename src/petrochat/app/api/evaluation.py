@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from ..core import get_settings
+from ..evaluation import build_quality_gate
 from ..sql import validate_sql
 
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
@@ -408,16 +409,19 @@ def _failure_report(rows: list[dict[str, Any]], source_path: Path, limit: int) -
 
 
 def _to_dashboard_summary(raw: dict[str, Any], source_path: Path) -> dict[str, Any]:
+    settings = get_settings()
     dataset = raw.get("dataset_profile") or {}
     sql = raw.get("sql_contract") or {}
     memory = raw.get("memory_contract") or {}
     rag = raw.get("rag_contract") or {}
     prediction = raw.get("prediction_metrics") or {}
+    quality_gate = build_quality_gate(raw, settings.eval_gate_thresholds)
     return {
         "title": "Golden Set 评估摘要",
         "generatedAt": _generated_at(raw, source_path),
         "source": str(source_path),
         "note": "仅展示聚合指标；原始 Golden Set 与评估结果文件不提交远程。",
+        "qualityGate": quality_gate,
         "dataset": {
             "dialogues": dataset.get("dialogue_count", 0),
             "turns": dataset.get("turn_count", 0),
@@ -555,6 +559,7 @@ def _prediction_path_for_run(raw: dict[str, Any], default_path: Path) -> Path:
 def _to_run_summary(raw: dict[str, Any], summary_path: Path, prediction_path: Path) -> dict[str, Any]:
     dataset = raw.get("dataset_profile") or {}
     prediction = raw.get("prediction_metrics") or {}
+    quality_gate = build_quality_gate(raw, get_settings().eval_gate_thresholds)
     generated_at = _generated_at(raw, summary_path)
     run_stamp = int(summary_path.stat().st_mtime) if summary_path.exists() else 0
     return {
@@ -576,6 +581,12 @@ def _to_run_summary(raw: dict[str, Any], summary_path: Path, prediction_path: Pa
             "ragRecallAt5": _percent(prediction.get("rag_recall_at_5")),
             "ragMrr": _percent(prediction.get("rag_mrr")),
             "memoryHitRate": _percent(prediction.get("memory_hit_rate")),
+        },
+        "qualityGate": {
+            "status": quality_gate["status"],
+            "label": quality_gate["label"],
+            "failedCount": quality_gate["failedCount"],
+            "warningCount": quality_gate["warningCount"],
         },
         "artifacts": {
             "summary": summary_path.exists(),

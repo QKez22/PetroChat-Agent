@@ -28,6 +28,19 @@ REQUIRED_FILES = {
 WRITE_SQL_PATTERN = re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE)\b", re.I)
 SELECT_STAR_PATTERN = re.compile(r"SELECT\s+\*", re.I)
 
+DEFAULT_QUALITY_GATE_THRESHOLDS = {
+    "success_rate": 0.95,
+    "sql_template_valid_rate": 0.95,
+    "sql_validation_rate": 0.95,
+    "sql_contract_accuracy": 0.85,
+    "rag_recall_at_5": 0.85,
+    "rag_mrr": 0.65,
+    "rag_faithfulness_proxy": 0.85,
+    "memory_hit_rate": 0.80,
+    "memory_ignore_violation_rate": 0.0,
+    "max_avg_latency_ms": 15000.0,
+}
+
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -469,6 +482,212 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
     }
 
 
+def _thresholds(overrides: dict[str, float] | None = None) -> dict[str, float]:
+    values = dict(DEFAULT_QUALITY_GATE_THRESHOLDS)
+    if overrides:
+        values.update({key: float(value) for key, value in overrides.items()})
+    return values
+
+
+def _gate_check(
+    check_id: str,
+    label: str,
+    value: float | int | None,
+    target: float | int,
+    operator: str,
+    severity: str,
+    detail: str = "",
+) -> dict[str, Any]:
+    if value is None:
+        status = "skip"
+        passed = None
+    elif operator == ">=":
+        passed = float(value) >= float(target)
+        status = "pass" if passed else severity
+    elif operator == "<=":
+        passed = float(value) <= float(target)
+        status = "pass" if passed else severity
+    elif operator == "==":
+        passed = value == target
+        status = "pass" if passed else severity
+    else:
+        raise ValueError(f"unsupported gate operator: {operator}")
+
+    return {
+        "id": check_id,
+        "label": label,
+        "value": value,
+        "target": target,
+        "operator": operator,
+        "status": status,
+        "severity": severity,
+        "passed": passed,
+        "detail": detail,
+    }
+
+
+def _gate_label(status: str) -> str:
+    labels = {
+        "pass": "通过",
+        "warn": "预警",
+        "fail": "失败",
+        "profile-only": "仅画像",
+    }
+    return labels.get(status, status)
+
+
+def build_quality_gate(
+    result: dict[str, Any],
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Build a compact quality gate for dashboards and CI checks."""
+
+    gate_thresholds = _thresholds(thresholds)
+    sql = result.get("sql_contract") or {}
+    prediction = result.get("prediction_metrics") or {}
+    checks = [
+        _gate_check(
+            "sql_template_valid_rate",
+            "SQL 模板通过率",
+            sql.get("template_valid_rate"),
+            gate_thresholds["sql_template_valid_rate"],
+            ">=",
+            "fail",
+            "Golden Set 中的期望 SQL 模板必须通过 AST 校验。",
+        ),
+        _gate_check(
+            "write_operation_violations",
+            "写操作违规数",
+            sql.get("write_operation_violations"),
+            0,
+            "==",
+            "fail",
+            "NL2SQL 只允许只读 SELECT，不允许写操作。",
+        ),
+        _gate_check(
+            "select_star_violations",
+            "SELECT * 违规数",
+            sql.get("select_star_violations"),
+            0,
+            "==",
+            "warn",
+            "演示和生产查询都应尽量显式选择字段。",
+        ),
+    ]
+
+    if prediction:
+        checks.extend([
+            _gate_check(
+                "success_rate",
+                "Agent 成功率",
+                prediction.get("success_rate"),
+                gate_thresholds["success_rate"],
+                ">=",
+                "fail",
+                "真实回放中 Agent 调用不能出现大量异常。",
+            ),
+            _gate_check(
+                "sql_validation_rate",
+                "SQL 校验率",
+                prediction.get("sql_validation_rate"),
+                gate_thresholds["sql_validation_rate"],
+                ">=",
+                "fail",
+                "生成 SQL 必须稳定通过只读安全校验。",
+            ),
+            _gate_check(
+                "sql_contract_accuracy",
+                "SQL 合约准确率",
+                prediction.get("sql_contract_accuracy"),
+                gate_thresholds["sql_contract_accuracy"],
+                ">=",
+                "warn",
+                "同时检查 SQL 合法性、期望表和过滤条件命中。",
+            ),
+            _gate_check(
+                "rag_recall_at_5",
+                "RAG Recall@5",
+                prediction.get("rag_recall_at_5"),
+                gate_thresholds["rag_recall_at_5"],
+                ">=",
+                "warn",
+                "标注证据应出现在前 5 条检索结果内。",
+            ),
+            _gate_check(
+                "rag_mrr",
+                "RAG MRR",
+                prediction.get("rag_mrr"),
+                gate_thresholds["rag_mrr"],
+                ">=",
+                "warn",
+                "越早命中证据，说明检索排序越可靠。",
+            ),
+            _gate_check(
+                "rag_faithfulness_proxy",
+                "忠实性代理指标",
+                prediction.get("rag_faithfulness_proxy"),
+                gate_thresholds["rag_faithfulness_proxy"],
+                ">=",
+                "warn",
+                "基于检索命中、非空回答和 forbidden points 的规则代理指标。",
+            ),
+            _gate_check(
+                "memory_hit_rate",
+                "Memory Hit Rate",
+                prediction.get("memory_hit_rate"),
+                gate_thresholds["memory_hit_rate"],
+                ">=",
+                "warn",
+                "需要继承记忆的轮次应召回或使用正确记忆。",
+            ),
+            _gate_check(
+                "memory_ignore_violation_rate",
+                "记忆忽略违规率",
+                prediction.get("memory_ignore_violation_rate"),
+                gate_thresholds["memory_ignore_violation_rate"],
+                "<=",
+                "fail",
+                "应忽略的旧条件不能继续污染回答或 SQL。",
+            ),
+            _gate_check(
+                "avg_latency_ms",
+                "平均延迟",
+                prediction.get("avg_latency_ms"),
+                gate_thresholds["max_avg_latency_ms"],
+                "<=",
+                "warn",
+                "用于发现工具调用、数据库查询或模型响应明显变慢。",
+            ),
+        ])
+
+    statuses = [item["status"] for item in checks if item["status"] != "skip"]
+    if not prediction:
+        status = "profile-only"
+    elif "fail" in statuses:
+        status = "fail"
+    elif "warn" in statuses:
+        status = "warn"
+    else:
+        status = "pass"
+
+    failed_checks = [item for item in checks if item["status"] in {"fail", "warn"}]
+    return {
+        "status": status,
+        "label": _gate_label(status),
+        "summary": (
+            "仅完成 Golden Set 合约画像，尚未提供 prediction JSONL。"
+            if status == "profile-only"
+            else f"{len(failed_checks)} 项检查需要关注。"
+            if failed_checks
+            else "所有核心质量门禁均已通过。"
+        ),
+        "checks": checks,
+        "failedCount": len([item for item in failed_checks if item["status"] == "fail"]),
+        "warningCount": len([item for item in failed_checks if item["status"] == "warn"]),
+        "thresholds": gate_thresholds,
+    }
+
+
 def _write_outputs(result: dict[str, Any], out_dir: Path) -> dict[str, str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "golden_eval_summary.json"
@@ -484,6 +703,7 @@ def _render_markdown(result: dict[str, Any]) -> str:
     memory = result["memory_contract"]
     rag = result["rag_contract"]
     prediction = result.get("prediction_metrics")
+    gate = result.get("quality_gate") or build_quality_gate(result)
     lines = [
         "# PetroChat-Agent Golden Set Evaluation",
         "",
@@ -503,6 +723,13 @@ def _render_markdown(result: dict[str, Any]) -> str:
         f"- Memory turns requiring ignored keys: {memory['requires_memory_ignore_turns']}",
         f"- RAG avg keywords: {rag['avg_keywords']}",
         f"- RAG avg must-include points: {rag['avg_must_include_points']}",
+        "",
+        "## Quality Gate",
+        "",
+        f"- Status: {gate['status']} ({gate['label']})",
+        f"- Summary: {gate['summary']}",
+        f"- Failed checks: {gate['failedCount']}",
+        f"- Warning checks: {gate['warningCount']}",
     ]
     if prediction:
         lines.extend([
@@ -556,5 +783,8 @@ def evaluate_golden_set(
         result["prediction_metrics"] = prediction_metrics
         result["prediction_path"] = str(prediction_path)
     if out_dir is not None:
+        result["quality_gate"] = build_quality_gate(result)
         result["outputs"] = _write_outputs(result, out_dir)
+    else:
+        result["quality_gate"] = build_quality_gate(result)
     return result

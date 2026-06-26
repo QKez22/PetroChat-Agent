@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     eval_predictions_path: Path = Field(
         default=PROJECT_ROOT / "data" / "eval_results" / "predictions.jsonl"
     )
+    eval_gate_success_rate: float = Field(default=0.95)
+    eval_gate_sql_template_valid_rate: float = Field(default=0.95)
+    eval_gate_sql_validation_rate: float = Field(default=0.95)
+    eval_gate_sql_contract_accuracy: float = Field(default=0.85)
+    eval_gate_rag_recall_at_5: float = Field(default=0.85)
+    eval_gate_rag_mrr: float = Field(default=0.65)
+    eval_gate_rag_faithfulness_proxy: float = Field(default=0.85)
+    eval_gate_memory_hit_rate: float = Field(default=0.80)
+    eval_gate_memory_ignore_violation_rate: float = Field(default=0.0)
+    eval_gate_max_avg_latency_ms: float = Field(default=15000.0)
 
     @property
     def chroma_url(self) -> str:
@@ -94,6 +104,21 @@ class Settings(BaseSettings):
     @property
     def mysql_whitelist(self) -> list[str]:
         return [t.strip() for t in self.mysql_tables_whitelist.split(",") if t.strip()]
+
+    @property
+    def eval_gate_thresholds(self) -> dict[str, float]:
+        return {
+            "success_rate": self.eval_gate_success_rate,
+            "sql_template_valid_rate": self.eval_gate_sql_template_valid_rate,
+            "sql_validation_rate": self.eval_gate_sql_validation_rate,
+            "sql_contract_accuracy": self.eval_gate_sql_contract_accuracy,
+            "rag_recall_at_5": self.eval_gate_rag_recall_at_5,
+            "rag_mrr": self.eval_gate_rag_mrr,
+            "rag_faithfulness_proxy": self.eval_gate_rag_faithfulness_proxy,
+            "memory_hit_rate": self.eval_gate_memory_hit_rate,
+            "memory_ignore_violation_rate": self.eval_gate_memory_ignore_violation_rate,
+            "max_avg_latency_ms": self.eval_gate_max_avg_latency_ms,
+        }
 
 
 @lru_cache(maxsize=1)
