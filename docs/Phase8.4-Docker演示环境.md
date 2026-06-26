@@ -87,6 +87,18 @@ curl http://localhost:8000/config
 curl http://localhost:5173/health
 ```
 
+## 数据保留 dry-run
+
+```powershell
+docker compose run --rm api uv run python scripts/cleanup_retention.py
+```
+
+正式执行：
+
+```powershell
+docker compose run --rm api uv run python scripts/cleanup_retention.py --execute --actor-id 1
+```
+
 查看日志：
 
 ```powershell

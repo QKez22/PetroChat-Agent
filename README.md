@@ -392,6 +392,17 @@ uv run python scripts/hash_password.py --password admin
 
 详细说明见 [docs/Phase9.1-权限生产化.md](docs/Phase9.1-权限生产化.md)。
 
+## Phase 9.2 数据保留任务
+
+新增 `RetentionCleanupService` 与命令行脚本，支持会话、消息、工具日志、可选 RAG 检索上下文、审计日志和长期记忆过期治理。默认 dry-run，不修改数据库；正式执行需要显式加 `--execute`，并会写入 `agent_audit_log`：
+
+```powershell
+uv run python scripts/cleanup_retention.py
+uv run python scripts/cleanup_retention.py --execute --actor-id 1 --reason "monthly retention cleanup"
+```
+
+详细说明见 [docs/Phase9.2-数据保留与清理任务.md](docs/Phase9.2-数据保留与清理任务.md)。
+
 ## License
 
 Apache License 2.0

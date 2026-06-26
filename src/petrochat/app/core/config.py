@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     auth_secret_key: SecretStr = Field(default=SecretStr("petrochat-dev-secret-change-me"))
     auth_token_expire_minutes: int = Field(default=480)
     auth_allow_plaintext_passwords: bool = Field(default=True)
+    retention_conversation_days: int = Field(default=180)
+    retention_conversation_recovery_days: int = Field(default=30)
+    retention_tool_log_days: int = Field(default=365)
+    retention_retrieval_context_days: int = Field(default=90)
+    retention_audit_log_days: int = Field(default=1095)
+    retention_temp_file_days: int = Field(default=30)
 
     short_term_turns: int = Field(default=6)
     long_term_memory_limit: int = Field(default=5)
