@@ -58,8 +58,10 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "/api/admin/tool-logs" in paths
     assert "/api/admin/audit-logs" in paths
     assert "/api/memory" in paths
+    assert "/api/memory/batch/disable" in paths
     assert "/api/memory/{memory_id}" in paths
     assert "/api/memory/{memory_id}/disable" in paths
+    assert "/api/memory/{memory_id}/conflicts" in paths
     assert "/api/memory/{memory_id}/events" in paths
     assert "post" in paths["/api/auth/login"]
     assert "get" in paths["/api/auth/me"]
@@ -72,8 +74,10 @@ def test_auth_endpoints_in_openapi() -> None:
     assert "get" in paths["/api/admin/audit-logs"]
     assert "get" in paths["/api/memory"]
     assert "post" in paths["/api/memory"]
+    assert "post" in paths["/api/memory/batch/disable"]
     assert "patch" in paths["/api/memory/{memory_id}"]
     assert "delete" in paths["/api/memory/{memory_id}"]
+    assert "get" in paths["/api/memory/{memory_id}/conflicts"]
 
 
 def test_dev_login_returns_local_token(monkeypatch) -> None:
@@ -387,6 +391,53 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["confidence"] == 0.8
+
+    similar_a = client.post(
+        "/api/memory",
+        json={
+            "user_id": "1",
+            "memory_type": "query_filter",
+            "content": "default query refinery one running tasks",
+            "source": "manual",
+            "confidence": 0.9,
+            "metadata": {"department": "refinery-one"},
+            "actor_id": "1",
+        },
+    ).json()
+    similar_b = client.post(
+        "/api/memory",
+        json={
+            "user_id": "1",
+            "memory_type": "query_filter",
+            "content": "default query refinery one running task list",
+            "source": "manual",
+            "confidence": 0.85,
+            "metadata": {"department": "refinery-one"},
+            "actor_id": "1",
+        },
+    ).json()
+
+    search_resp = client.get("/api/memory", params={"user_id": "1", "q": "refinery-one"})
+    assert search_resp.status_code == 200
+    assert {row["id"] for row in search_resp.json()} >= {similar_a["id"], similar_b["id"]}
+
+    conflicts_resp = client.get(f"/api/memory/{similar_a['id']}/conflicts")
+    assert conflicts_resp.status_code == 200
+    assert conflicts_resp.json()[0]["memory"]["id"] == similar_b["id"]
+    assert conflicts_resp.json()[0]["score"] > 0
+
+    batch_resp = client.post(
+        "/api/memory/batch/disable",
+        json={
+            "memory_ids": [similar_a["id"], similar_b["id"], "999999"],
+            "actor_id": "1",
+            "reason": "batch governance",
+        },
+    )
+    assert batch_resp.status_code == 200
+    assert batch_resp.json()["requested"] == 3
+    assert batch_resp.json()["updated"] == 2
+    assert batch_resp.json()["missing"] == ["999999"]
 
     disable_resp = client.post(
         f"/api/memory/{item['id']}/disable",

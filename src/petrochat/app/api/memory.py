@@ -40,6 +40,12 @@ class MemoryActionRequest(BaseModel):
     reason: str = Field(default="", max_length=200)
 
 
+class MemoryBatchActionRequest(BaseModel):
+    memory_ids: list[str] = Field(min_length=1, max_length=50)
+    actor_id: str | None = Field(default=None, max_length=64)
+    reason: str = Field(default="batch disable memory", max_length=200)
+
+
 class MemoryResponse(BaseModel):
     id: str
     user_id: str
@@ -63,6 +69,19 @@ class MemoryEventResponse(BaseModel):
     reason: str
     payload: dict[str, Any]
     created_at: str
+
+
+class MemoryConflictResponse(BaseModel):
+    memory: MemoryResponse
+    score: float
+    reason: str
+
+
+class MemoryBatchActionResponse(BaseModel):
+    requested: int
+    updated: int
+    missing: list[str]
+    items: list[MemoryResponse]
 
 
 def _to_memory_response(item: MemoryItem) -> MemoryResponse:
@@ -94,11 +113,39 @@ def _to_event_response(event: MemoryEvent) -> MemoryEventResponse:
     )
 
 
+def _tokens(value: str) -> set[str]:
+    normalized = "".join(ch.lower() if ch.isalnum() else " " for ch in value)
+    return {part for part in normalized.split() if len(part) >= 2}
+
+
+def _conflict_score(current: MemoryItem, candidate: MemoryItem) -> tuple[float, str]:
+    if current.id == candidate.id:
+        return 0, ""
+    if current.user_id != candidate.user_id or current.memory_type != candidate.memory_type:
+        return 0, ""
+
+    current_text = current.content.strip().lower()
+    candidate_text = candidate.content.strip().lower()
+    if current_text and (current_text in candidate_text or candidate_text in current_text):
+        return 0.95, "同用户同类型记忆内容存在包含关系"
+
+    current_tokens = _tokens(current.content)
+    candidate_tokens = _tokens(candidate.content)
+    if not current_tokens or not candidate_tokens:
+        return 0, ""
+    overlap = len(current_tokens & candidate_tokens)
+    score = overlap / max(len(current_tokens), len(candidate_tokens))
+    if score >= 0.45:
+        return round(score, 3), "同用户同类型记忆关键词重叠较高"
+    return 0, ""
+
+
 @router.get("", response_model=list[MemoryResponse], summary="长期记忆列表")
 async def list_memories(
     user_id: str,
     status: Literal["active", "disabled", "deleted", "all"] = "active",
     memory_type: str | None = None,
+    q: str | None = None,
     limit: int = 50,
 ) -> list[MemoryResponse]:
     store = get_long_term_memory_store()
@@ -107,6 +154,7 @@ async def list_memories(
             user_id=user_id,
             status=status,
             memory_type=memory_type,
+            q=q,
             limit=limit,
         )
     except ValueError as exc:
@@ -150,6 +198,68 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest) -> MemoryRespo
     if item is None:
         raise HTTPException(status_code=404, detail="memory not found")
     return _to_memory_response(item)
+
+
+@router.post("/batch/disable", response_model=MemoryBatchActionResponse, summary="批量禁用长期记忆")
+async def batch_disable_memories(req: MemoryBatchActionRequest) -> MemoryBatchActionResponse:
+    store = get_long_term_memory_store()
+    updated: list[MemoryItem] = []
+    missing: list[str] = []
+    seen: set[str] = set()
+    for memory_id in req.memory_ids:
+        if memory_id in seen:
+            continue
+        seen.add(memory_id)
+        try:
+            item = store.disable_memory(
+                memory_id,
+                actor_id=req.actor_id,
+                reason=req.reason or "batch disable memory",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if item is None:
+            missing.append(memory_id)
+        else:
+            updated.append(item)
+    return MemoryBatchActionResponse(
+        requested=len(req.memory_ids),
+        updated=len(updated),
+        missing=missing,
+        items=[_to_memory_response(item) for item in updated],
+    )
+
+
+@router.get("/{memory_id}/conflicts", response_model=list[MemoryConflictResponse], summary="长期记忆冲突提示")
+async def memory_conflicts(memory_id: str, limit: int = 5) -> list[MemoryConflictResponse]:
+    store = get_long_term_memory_store()
+    try:
+        current = store.get_memory(memory_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        candidates = store.list_memories(
+            user_id=current.user_id,
+            status="active",
+            memory_type=current.memory_type,
+            limit=100,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    scored: list[tuple[float, str, MemoryItem]] = []
+    for candidate in candidates:
+        score, reason = _conflict_score(current, candidate)
+        if score > 0:
+            scored.append((score, reason, candidate))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        MemoryConflictResponse(
+            memory=_to_memory_response(item),
+            score=score,
+            reason=reason,
+        )
+        for score, reason, item in scored[: max(1, min(limit, 20))]
+    ]
 
 
 @router.post("/{memory_id}/disable", response_model=MemoryResponse, summary="禁用长期记忆")

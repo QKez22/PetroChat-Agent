@@ -1558,7 +1558,8 @@ button {
 
 .memory-toolbar {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(130px, 0.5fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(130px, 0.8fr) minmax(120px, 0.45fr) minmax(170px, 0.8fr) minmax(200px, 1fr) auto;
+  align-items: end;
   gap: 12px;
   padding: 14px;
   border: 1px solid #d8e0df;
@@ -1669,8 +1670,17 @@ button {
   padding: 14px;
 }
 
+.memory-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
 .memory-row {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   width: 100%;
   margin-bottom: 8px;
@@ -1680,12 +1690,30 @@ button {
   color: #1d252c;
   background: #fbfdfc;
   text-align: left;
-  cursor: pointer;
 }
 
 .memory-row.active {
   border-color: #176b61;
   box-shadow: 0 0 0 3px rgba(23, 107, 97, 0.12);
+}
+
+.memory-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: #176b61;
+}
+
+.memory-row-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 
 .memory-row-top,
@@ -1718,6 +1746,47 @@ button {
 
 .memory-detail-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.memory-conflict-list {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-conflict {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #f1d3a4;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #1d252c;
+  text-align: left;
+  cursor: pointer;
+}
+
+.memory-conflict span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.memory-conflict strong {
+  color: #92400e;
+}
+
+.memory-conflict small,
+.memory-conflict p {
+  overflow-wrap: anywhere;
+}
+
+.memory-conflict p {
+  margin: 0;
+  color: #34444b;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .json-panel {

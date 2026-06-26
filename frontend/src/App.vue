@@ -29,6 +29,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import {
   checkHealth,
+  batchDisableMemories,
   createMemory,
   deleteMemory,
   deleteSession,
@@ -42,6 +43,7 @@ import {
   getMe,
   getLatestEvaluation,
   getMemoryEvents,
+  getMemoryConflicts,
   getSession,
   listMemories,
   listSessions,
@@ -113,13 +115,18 @@ const selectedEvaluationRunId = ref(evaluationRuns.value[0]?.id || null);
 const isLoadingEvaluation = ref(false);
 const memoryTargetUserId = ref(currentUser.value?.user_id || "");
 const memoryStatusFilter = ref("active");
+const memorySearchQuery = ref("");
 const memories = ref([]);
 const memoryEvents = ref([]);
+const memoryConflicts = ref([]);
+const selectedMemoryIds = ref([]);
 const selectedMemoryId = ref(null);
 const memoryError = ref("");
 const memoryEventError = ref("");
+const memoryConflictError = ref("");
 const isLoadingMemories = ref(false);
 const isLoadingMemoryEvents = ref(false);
+const isLoadingMemoryConflicts = ref(false);
 const memoryActionReason = ref("用户前端治理");
 const memoryForm = ref({
   memory_type: "preference",
@@ -154,6 +161,7 @@ const memoryStats = computed(() => {
   const deleted = memories.value.filter((item) => item.status === "deleted").length;
   return { total, active, disabled, deleted };
 });
+const selectedMemoryCount = computed(() => selectedMemoryIds.value.length);
 const visibleLogs = computed(() => {
   if (isAdmin.value) {
     return adminLogs.value;
@@ -218,6 +226,8 @@ function clearAuth() {
   sessions.value = [];
   memories.value = [];
   memoryEvents.value = [];
+  memoryConflicts.value = [];
+  selectedMemoryIds.value = [];
   selectedMemoryId.value = null;
   memoryTargetUserId.value = "";
   adminOverview.value = null;
@@ -381,18 +391,28 @@ async function refreshMemories() {
   try {
     memories.value = await listMemories(targetUserId, {
       status: memoryStatusFilter.value,
+      q: memorySearchQuery.value.trim(),
       limit: 100,
     });
+    const visibleIds = new Set(memories.value.map((item) => item.id));
+    selectedMemoryIds.value = selectedMemoryIds.value.filter((id) => visibleIds.has(id));
     selectedMemoryId.value = memories.value[0]?.id || null;
     if (selectedMemoryId.value) {
-      await refreshMemoryEvents(selectedMemoryId.value);
+      await Promise.all([
+        refreshMemoryEvents(selectedMemoryId.value),
+        refreshMemoryConflicts(selectedMemoryId.value),
+      ]);
     } else {
       memoryEvents.value = [];
+      memoryConflicts.value = [];
       memoryEventError.value = "";
+      memoryConflictError.value = "";
     }
   } catch (error) {
     memories.value = [];
     memoryEvents.value = [];
+    memoryConflicts.value = [];
+    selectedMemoryIds.value = [];
     selectedMemoryId.value = null;
     memoryError.value = error.message || "长期记忆加载失败";
   } finally {
@@ -417,9 +437,40 @@ async function refreshMemoryEvents(memoryId = selectedMemoryId.value) {
   }
 }
 
+async function refreshMemoryConflicts(memoryId = selectedMemoryId.value) {
+  if (!memoryId) {
+    memoryConflicts.value = [];
+    return;
+  }
+  isLoadingMemoryConflicts.value = true;
+  memoryConflictError.value = "";
+  try {
+    memoryConflicts.value = await getMemoryConflicts(memoryId, 5);
+  } catch (error) {
+    memoryConflicts.value = [];
+    memoryConflictError.value = error.message || "记忆冲突提示加载失败";
+  } finally {
+    isLoadingMemoryConflicts.value = false;
+  }
+}
+
 async function openMemory(memoryId) {
   selectedMemoryId.value = memoryId;
-  await refreshMemoryEvents(memoryId);
+  await Promise.all([refreshMemoryEvents(memoryId), refreshMemoryConflicts(memoryId)]);
+}
+
+function toggleMemorySelection(memoryId, checked) {
+  if (checked) {
+    if (!selectedMemoryIds.value.includes(memoryId)) {
+      selectedMemoryIds.value = [...selectedMemoryIds.value, memoryId];
+    }
+    return;
+  }
+  selectedMemoryIds.value = selectedMemoryIds.value.filter((id) => id !== memoryId);
+}
+
+function clearMemorySelection() {
+  selectedMemoryIds.value = [];
 }
 
 async function submitMemory() {
@@ -464,6 +515,24 @@ async function disableSelectedMemory() {
     await refreshMemories();
   } catch (error) {
     memoryError.value = error.message || "长期记忆禁用失败";
+  }
+}
+
+async function disableSelectedMemories() {
+  if (!selectedMemoryIds.value.length || !currentUser.value) {
+    return;
+  }
+  memoryError.value = "";
+  try {
+    await batchDisableMemories(
+      selectedMemoryIds.value,
+      currentUser.value.user_id,
+      memoryActionReason.value || "frontend batch disable",
+    );
+    selectedMemoryIds.value = [];
+    await refreshMemories();
+  } catch (error) {
+    memoryError.value = error.message || "长期记忆批量禁用失败";
   }
 }
 
@@ -1146,9 +1215,21 @@ onMounted(async () => {
               </select>
             </label>
             <label>
+              <span>搜索</span>
+              <input
+                v-model="memorySearchQuery"
+                maxlength="80"
+                placeholder="内容、类型、来源或元数据"
+                @keydown.enter.prevent="refreshMemories"
+              />
+            </label>
+            <label>
               <span>操作原因</span>
               <input v-model="memoryActionReason" maxlength="200" />
             </label>
+            <button class="secondary-button" type="button" @click="refreshMemories">
+              搜索
+            </button>
           </section>
 
           <section class="metric-grid memory-metrics">
@@ -1213,28 +1294,52 @@ onMounted(async () => {
             <div class="memory-list">
               <div class="panel-heading">
                 <h3>长期记忆</h3>
-                <span>{{ memories.length }} 条</span>
+                <span>{{ memories.length }} 条 / 已选 {{ selectedMemoryCount }}</span>
+              </div>
+              <div class="memory-batch-bar">
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="!selectedMemoryIds.length"
+                  @click="disableSelectedMemories"
+                >
+                  批量禁用
+                </button>
+                <button
+                  class="tiny-button"
+                  type="button"
+                  :disabled="!selectedMemoryIds.length"
+                  @click="clearMemorySelection"
+                >
+                  清空选择
+                </button>
               </div>
 
-              <button
+              <div
                 v-for="item in memories"
                 :key="item.id"
                 class="memory-row"
                 :class="{ active: selectedMemory?.id === item.id }"
-                type="button"
-                @click="openMemory(item.id)"
               >
-                <span class="memory-row-top">
-                  <strong>{{ memoryTypeLabel(item.memory_type) }}</strong>
-                  <small :class="['status-pill', item.status]">{{ memoryStatusLabel(item.status) }}</small>
-                </span>
-                <span class="memory-text">{{ item.content }}</span>
-                <span class="memory-row-bottom">
-                  <small>memory:{{ item.id }}</small>
-                  <small>{{ Number(item.confidence).toFixed(2) }}</small>
-                  <small>{{ formatTime(item.updated_at) }}</small>
-                </span>
-              </button>
+                <input
+                  type="checkbox"
+                  :checked="selectedMemoryIds.includes(item.id)"
+                  :aria-label="`选择 memory ${item.id}`"
+                  @change="toggleMemorySelection(item.id, $event.target.checked)"
+                />
+                <button class="memory-row-main" type="button" @click="openMemory(item.id)">
+                  <span class="memory-row-top">
+                    <strong>{{ memoryTypeLabel(item.memory_type) }}</strong>
+                    <small :class="['status-pill', item.status]">{{ memoryStatusLabel(item.status) }}</small>
+                  </span>
+                  <span class="memory-text">{{ item.content }}</span>
+                  <span class="memory-row-bottom">
+                    <small>memory:{{ item.id }}</small>
+                    <small>{{ Number(item.confidence).toFixed(2) }}</small>
+                    <small>{{ formatTime(item.updated_at) }}</small>
+                  </span>
+                </button>
+              </div>
 
               <div v-if="!isLoadingMemories && !memories.length" class="admin-empty">
                 <Database :size="34" />
@@ -1292,6 +1397,32 @@ onMounted(async () => {
                 <section class="detail-section">
                   <h4>记忆正文</h4>
                   <p>{{ selectedMemory.content }}</p>
+                </section>
+
+                <section class="detail-section">
+                  <div class="panel-heading">
+                    <h4>冲突提示</h4>
+                    <button class="tiny-button" type="button" title="刷新冲突提示" @click="refreshMemoryConflicts()">
+                      <RefreshCw :size="14" :class="{ spin: isLoadingMemoryConflicts }" />
+                    </button>
+                  </div>
+                  <p v-if="memoryConflictError" class="eval-note warning">{{ memoryConflictError }}</p>
+                  <div v-if="memoryConflicts.length" class="memory-conflict-list">
+                    <button
+                      v-for="item in memoryConflicts"
+                      :key="item.memory.id"
+                      class="memory-conflict"
+                      type="button"
+                      @click="openMemory(item.memory.id)"
+                    >
+                      <span>
+                        <strong>{{ Number(item.score).toFixed(2) }}</strong>
+                        <small>{{ item.reason }}</small>
+                      </span>
+                      <p>{{ item.memory.content }}</p>
+                    </button>
+                  </div>
+                  <p v-else class="empty-inline">暂无同类型高相似记忆。</p>
                 </section>
 
                 <section class="detail-section">

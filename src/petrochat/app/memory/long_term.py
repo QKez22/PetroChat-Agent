@@ -193,6 +193,7 @@ class LongTermMemoryStore:
         user_id: str,
         status: MemoryStatus | Literal["all"] = "active",
         memory_type: str | None = None,
+        q: str | None = None,
         limit: int = 50,
     ) -> list[MemoryItem]:
         clauses = ["user_id = :user_id"]
@@ -206,6 +207,18 @@ class LongTermMemoryStore:
         if memory_type:
             clauses.append("memory_type = :memory_type")
             params["memory_type"] = memory_type
+        if q and q.strip():
+            clauses.append(
+                """
+                (
+                    content LIKE :q
+                    OR memory_type LIKE :q
+                    OR source LIKE :q
+                    OR metadata_json LIKE :q
+                )
+                """
+            )
+            params["q"] = f"%{q.strip()}%"
         query = f"""
             SELECT id, user_id, memory_type, content, source, confidence, status,
                    metadata_json, created_at, updated_at, expires_at

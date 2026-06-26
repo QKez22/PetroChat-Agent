@@ -207,6 +207,9 @@ export async function listMemories(userId, options = {}) {
   if (options.memoryType) {
     params.set("memory_type", options.memoryType);
   }
+  if (options.q) {
+    params.set("q", options.q);
+  }
   const response = await fetch(`${API_BASE}/api/memory?${params.toString()}`);
   return readJson(response);
 }
@@ -232,6 +235,19 @@ export async function disableMemory(memoryId, actorId, reason) {
   return readJson(response);
 }
 
+export async function batchDisableMemories(memoryIds, actorId, reason) {
+  const response = await fetch(`${API_BASE}/api/memory/batch/disable`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      memory_ids: memoryIds,
+      actor_id: actorId || null,
+      reason: reason || "frontend batch disable",
+    }),
+  });
+  return readJson(response);
+}
+
 export async function deleteMemory(memoryId, actorId, reason) {
   const params = new URLSearchParams({
     reason: reason || "frontend delete",
@@ -248,5 +264,11 @@ export async function deleteMemory(memoryId, actorId, reason) {
 export async function getMemoryEvents(memoryId, limit = 50) {
   const params = new URLSearchParams({ limit: String(limit) });
   const response = await fetch(`${API_BASE}/api/memory/${memoryId}/events?${params.toString()}`);
+  return readJson(response);
+}
+
+export async function getMemoryConflicts(memoryId, limit = 5) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/conflicts?${params.toString()}`);
   return readJson(response);
 }
