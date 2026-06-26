@@ -109,8 +109,56 @@ def _load_prediction_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _trace_hint(dialogue_id: str | None = None, turn_id: str | None = None) -> dict[str, Any]:
+def _trace_filter(label: str, value: Any) -> dict[str, str] | None:
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return None
+    return {"label": label, "value": text}
+
+
+def _trace_hint(
+    dialogue_id: str | None = None,
+    turn_id: str | None = None,
+    *,
+    run_id: str | None = None,
+    session_id: str | None = None,
+    trace_url: str | None = None,
+) -> dict[str, Any]:
     settings = get_settings()
+    normalized_run_id = str(run_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id and dialogue_id and dialogue_id != "-":
+        normalized_session_id = (
+            f"eval-{normalized_run_id}-{dialogue_id}"
+            if normalized_run_id
+            else f"eval-{dialogue_id}"
+        )
+
+    filters = [
+        item
+        for item in (
+            _trace_filter("run_id", normalized_run_id),
+            _trace_filter("session_id", normalized_session_id),
+            _trace_filter("dialogue_id", dialogue_id),
+            _trace_filter("turn_id", turn_id),
+        )
+        if item is not None
+    ]
+    query = " ".join(f"{item['label']}:{item['value']}" for item in filters)
+    if not query:
+        query = "session_id:eval-*"
+    return {
+        "enabled": settings.langsmith_tracing,
+        "project": settings.langsmith_project,
+        "runId": normalized_run_id,
+        "sessionId": normalized_session_id,
+        "query": query,
+        "copyText": query,
+        "filters": filters,
+        "traceUrl": str(trace_url or "").strip(),
+        "searchUrl": "https://smith.langchain.com/",
+        "note": "Use copyText filters in LangSmith to locate replay traces without exposing raw prompts.",
+    }
     session_id = f"eval-{dialogue_id}" if dialogue_id and dialogue_id != "-" else ""
     query = f"session_id:{session_id}" if session_id else "session_id:eval-*"
     if turn_id and turn_id != "-":
@@ -316,7 +364,13 @@ def _to_failure_case(row: dict[str, Any]) -> dict[str, Any]:
         "answerSummary": _clip(row.get("answer"), 140),
         "sqlSummary": _sql_summary(str(row.get("sql") or "")),
         "retrievalSummary": _retrieval_summary(row.get("retrieved")),
-        "traceHint": _trace_hint(dialogue_id, turn_id),
+        "traceHint": _trace_hint(
+            dialogue_id,
+            turn_id,
+            run_id=str(row.get("run_id") or ""),
+            session_id=str(row.get("session_id") or ""),
+            trace_url=str(row.get("trace_url") or row.get("run_url") or ""),
+        ),
         "latencyMs": latency_ms,
     }
 
@@ -528,7 +582,11 @@ def _to_run_summary(raw: dict[str, Any], summary_path: Path, prediction_path: Pa
             "markdown": summary_path.with_suffix(".md").exists(),
             "predictions": prediction_path.exists(),
         },
-        "traceHint": _trace_hint(),
+        "traceHint": _trace_hint(
+            run_id=str(raw.get("run_id") or ""),
+            session_id=str(raw.get("session_id") or ""),
+            trace_url=str(raw.get("trace_url") or raw.get("run_url") or ""),
+        ),
     }
 
 

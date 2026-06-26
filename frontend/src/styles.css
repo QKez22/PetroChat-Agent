@@ -1182,7 +1182,7 @@ button {
 
 .eval-trace-panel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
@@ -1212,6 +1212,62 @@ button {
   margin-top: 4px;
   color: #1d252c;
   font-size: 13px;
+}
+
+.trace-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+  white-space: normal !important;
+}
+
+.trace-actions.inline {
+  margin-top: 8px;
+}
+
+.trace-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #c8d8d5;
+  border-radius: 6px;
+  background: #f8fbfa;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.trace-action:hover {
+  border-color: #0f766e;
+  background: #e7f3f1;
+}
+
+.trace-filter-list {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+  white-space: normal !important;
+}
+
+.trace-filter-list small {
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #dcebe8;
+  color: #33424a;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.trace-copy-text {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #1d252c;
+  font-weight: 800;
 }
 
 .eval-case-grid {

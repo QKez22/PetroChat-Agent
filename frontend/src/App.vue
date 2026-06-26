@@ -6,8 +6,10 @@ import {
   Bot,
   CircleStop,
   ClipboardList,
+  Copy,
   Database,
   Download,
+  ExternalLink,
   FileText,
   Gauge,
   History,
@@ -113,6 +115,7 @@ const evaluationRuns = ref(fallbackEvaluationSummary.runs || []);
 const evaluationRunError = ref("");
 const selectedEvaluationRunId = ref(evaluationRuns.value[0]?.id || null);
 const isLoadingEvaluation = ref(false);
+const copiedTraceText = ref("");
 const memoryTargetUserId = ref(currentUser.value?.user_id || "");
 const memoryStatusFilter = ref("active");
 const memorySearchQuery = ref("");
@@ -218,6 +221,42 @@ function persistAuth(token, user) {
   currentUser.value = user;
   localStorage.setItem(TOKEN_STORAGE_KEY, token);
   localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+function traceFilters(traceHint) {
+  return Array.isArray(traceHint?.filters) ? traceHint.filters : [];
+}
+
+function traceHref(traceHint) {
+  return traceHint?.traceUrl || traceHint?.searchUrl || "";
+}
+
+function traceLinkLabel(traceHint) {
+  return traceHint?.traceUrl ? "打开 Trace" : "打开 LangSmith";
+}
+
+async function copyTraceText(text) {
+  if (!text) {
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  }
+  copiedTraceText.value = text;
+  window.setTimeout(() => {
+    if (copiedTraceText.value === text) {
+      copiedTraceText.value = "";
+    }
+  }, 1600);
 }
 
 function clearAuth() {
@@ -1673,7 +1712,41 @@ onMounted(async () => {
                 </div>
                 <div>
                   <span>查询线索</span>
-                  <strong>{{ selectedEvaluationRun.traceHint.query }}</strong>
+                  <strong>{{ selectedEvaluationRun.traceHint.copyText || selectedEvaluationRun.traceHint.query }}</strong>
+                </div>
+                <div>
+                  <span>Trace 操作</span>
+                  <strong class="trace-actions">
+                    <a
+                      v-if="traceHref(selectedEvaluationRun.traceHint)"
+                      :href="traceHref(selectedEvaluationRun.traceHint)"
+                      target="_blank"
+                      rel="noreferrer"
+                      class="trace-action"
+                    >
+                      <ExternalLink :size="14" />
+                      {{ traceLinkLabel(selectedEvaluationRun.traceHint) }}
+                    </a>
+                    <button
+                      type="button"
+                      class="trace-action"
+                      @click="copyTraceText(selectedEvaluationRun.traceHint.copyText || selectedEvaluationRun.traceHint.query)"
+                    >
+                      <Copy :size="14" />
+                      {{ copiedTraceText === (selectedEvaluationRun.traceHint.copyText || selectedEvaluationRun.traceHint.query) ? "已复制" : "复制" }}
+                    </button>
+                  </strong>
+                </div>
+                <div v-if="traceFilters(selectedEvaluationRun.traceHint).length" class="trace-filter-cell">
+                  <span>Trace Filters</span>
+                  <strong class="trace-filter-list">
+                    <small
+                      v-for="item in traceFilters(selectedEvaluationRun.traceHint)"
+                      :key="`${item.label}-${item.value}`"
+                    >
+                      {{ item.label }}={{ item.value }}
+                    </small>
+                  </strong>
                 </div>
               </div>
             </div>
@@ -1782,7 +1855,42 @@ onMounted(async () => {
                     </div>
                     <div>
                       <dt>Trace 查询</dt>
-                      <dd>{{ selectedEvaluationCase.traceHint.query }}</dd>
+                      <dd>
+                        <span class="trace-copy-text">
+                          {{ selectedEvaluationCase.traceHint.copyText || selectedEvaluationCase.traceHint.query }}
+                        </span>
+                        <span
+                          v-if="traceFilters(selectedEvaluationCase.traceHint).length"
+                          class="trace-filter-list"
+                        >
+                          <small
+                            v-for="item in traceFilters(selectedEvaluationCase.traceHint)"
+                            :key="`${item.label}-${item.value}`"
+                          >
+                            {{ item.label }}={{ item.value }}
+                          </small>
+                        </span>
+                        <span class="trace-actions inline">
+                          <a
+                            v-if="traceHref(selectedEvaluationCase.traceHint)"
+                            :href="traceHref(selectedEvaluationCase.traceHint)"
+                            target="_blank"
+                            rel="noreferrer"
+                            class="trace-action"
+                          >
+                            <ExternalLink :size="14" />
+                            {{ traceLinkLabel(selectedEvaluationCase.traceHint) }}
+                          </a>
+                          <button
+                            type="button"
+                            class="trace-action"
+                            @click="copyTraceText(selectedEvaluationCase.traceHint.copyText || selectedEvaluationCase.traceHint.query)"
+                          >
+                            <Copy :size="14" />
+                            {{ copiedTraceText === (selectedEvaluationCase.traceHint.copyText || selectedEvaluationCase.traceHint.query) ? "已复制" : "复制" }}
+                          </button>
+                        </span>
+                      </dd>
                     </div>
                   </dl>
                 </div>

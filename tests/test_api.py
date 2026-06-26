@@ -93,6 +93,8 @@ def test_evaluation_failures_reads_prediction_samples(monkeypatch, tmp_path) -> 
     prediction_path = tmp_path / "predictions.jsonl"
     rows = [
         {
+            "run_id": "smoke-1",
+            "session_id": "eval-smoke-1-d1",
             "dialogue_id": "d1",
             "turn_id": "1",
             "mode": "agent",
@@ -150,7 +152,11 @@ def test_evaluation_failures_reads_prediction_samples(monkeypatch, tmp_path) -> 
     assert data["cases"][0]["primaryAttribution"]["type"] == "sql"
     assert data["cases"][0]["attributions"][0]["nextStep"]
     assert data["cases"][0]["sqlSummary"]["present"] is False
-    assert data["cases"][0]["traceHint"]["sessionId"] == "eval-d1"
+    assert data["cases"][0]["traceHint"]["runId"] == "smoke-1"
+    assert data["cases"][0]["traceHint"]["sessionId"] == "eval-smoke-1-d1"
+    assert "run_id:smoke-1" in data["cases"][0]["traceHint"]["copyText"]
+    assert data["cases"][0]["traceHint"]["filters"][0] == {"label": "run_id", "value": "smoke-1"}
+    assert data["cases"][0]["traceHint"]["searchUrl"] == "https://smith.langchain.com/"
     assert "sql" not in data["cases"][0]
     assert any("SQL" in reason for reason in data["cases"][0]["reasons"])
 
@@ -164,6 +170,7 @@ def test_evaluation_runs_reads_local_summaries(monkeypatch, tmp_path) -> None:
     prediction_path = tmp_path / "predictions.jsonl"
     summary_path.write_text(
         json.dumps({
+            "run_id": "smoke-summary-1",
             "dataset_profile": {
                 "dialogue_count": 5,
                 "turn_count": 12,
@@ -198,6 +205,9 @@ def test_evaluation_runs_reads_local_summaries(monkeypatch, tmp_path) -> None:
     assert run["artifacts"]["predictions"] is True
     assert run["traceHint"]["enabled"] is True
     assert run["traceHint"]["project"] == "petrochat-test"
+    assert run["traceHint"]["runId"] == "smoke-summary-1"
+    assert run["traceHint"]["copyText"] == "run_id:smoke-summary-1"
+    assert run["traceHint"]["filters"] == [{"label": "run_id", "value": "smoke-summary-1"}]
 
     get_settings.cache_clear()
 
