@@ -188,3 +188,17 @@ git push origin main
 - “失败/风险样例”详情展示同一套 Trace 过滤标签，便于从失败样例回到真实 Agent 调用链路。
 - 若后端回放产物提供 `trace_url` 或 `run_url`，前端优先展示“打开 Trace”；否则展示 LangSmith 入口并配合复制过滤条件使用。
 - 前端不会展示完整真实问题、完整 SQL 或完整检索片段，仍只展示摘要、ID、指标和排障线索。
+
+## Phase 8.4 Docker 启动
+
+项目根目录执行：
+
+```powershell
+docker compose up -d --build
+```
+
+Docker 模式下前端由 Nginx 提供静态文件，并把 `/api`、`/health`、`/config` 代理到 `api:8000`。浏览器访问：
+
+```text
+http://localhost:5173
+```
