@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     sql_timeout_seconds: int = Field(default=10)
     mysql_tables_whitelist: str = Field(default="affair,affair_task")
     mysql_enum_sample_threshold: int = Field(default=30)
+    auth_secret_key: SecretStr = Field(default=SecretStr("petrochat-dev-secret-change-me"))
+    auth_token_expire_minutes: int = Field(default=480)
+    auth_allow_plaintext_passwords: bool = Field(default=True)
 
     short_term_turns: int = Field(default=6)
     long_term_memory_limit: int = Field(default=5)

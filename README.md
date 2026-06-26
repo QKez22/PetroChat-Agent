@@ -382,6 +382,16 @@ docker compose up -d --build
 
 默认演示账号：`admin/admin`、`engineer/engineer`。详细说明见 [docs/Phase8.4-Docker演示环境.md](docs/Phase8.4-Docker演示环境.md)。
 
+## Phase 9.1 权限生产化
+
+认证链路已从前端本地演示 token 升级为 HMAC-SHA256 签名的 JWT 风格 token，包含 `iat/exp` 并支持 `Authorization: Bearer <token>`。管理员接口统一走 `require_admin` 守卫；前端管理员请求已改用 Header，避免 token 出现在 URL query 中。密码验证支持 `pbkdf2_sha256$...` 哈希，开发环境仍兼容当前 MySQL 明文密码；哈希生成脚本为：
+
+```powershell
+uv run python scripts/hash_password.py --password admin
+```
+
+详细说明见 [docs/Phase9.1-权限生产化.md](docs/Phase9.1-权限生产化.md)。
+
 ## License
 
 Apache License 2.0

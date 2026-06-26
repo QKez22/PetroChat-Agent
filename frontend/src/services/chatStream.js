@@ -47,7 +47,9 @@ export async function login(username, password) {
 }
 
 export async function getMe(token) {
-  const response = await fetch(`${API_BASE}/api/auth/me?token=${encodeURIComponent(token)}`);
+  const response = await fetch(`${API_BASE}/api/auth/me`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 
@@ -168,8 +170,12 @@ export async function getEvaluationRuns(limit = 10) {
   return readJson(response);
 }
 
-function adminParams(token, limit) {
-  const params = new URLSearchParams({ token: token || "" });
+function authHeaders(token) {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function adminParams(limit) {
+  const params = new URLSearchParams();
   if (limit) {
     params.set("limit", String(limit));
   }
@@ -177,24 +183,31 @@ function adminParams(token, limit) {
 }
 
 export async function getAdminOverview(token) {
-  const response = await fetch(`${API_BASE}/api/admin/overview?${adminParams(token).toString()}`);
+  const response = await fetch(`${API_BASE}/api/admin/overview`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 
 export async function getAdminConversations(token, limit = 50) {
   const response = await fetch(
-    `${API_BASE}/api/admin/conversations?${adminParams(token, limit).toString()}`,
+    `${API_BASE}/api/admin/conversations?${adminParams(limit).toString()}`,
+    { headers: authHeaders(token) },
   );
   return readJson(response);
 }
 
 export async function getAdminToolLogs(token, limit = 50) {
-  const response = await fetch(`${API_BASE}/api/admin/tool-logs?${adminParams(token, limit).toString()}`);
+  const response = await fetch(`${API_BASE}/api/admin/tool-logs?${adminParams(limit).toString()}`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 
 export async function getAdminAuditLogs(token, limit = 50) {
-  const response = await fetch(`${API_BASE}/api/admin/audit-logs?${adminParams(token, limit).toString()}`);
+  const response = await fetch(`${API_BASE}/api/admin/audit-logs?${adminParams(limit).toString()}`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 

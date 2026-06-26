@@ -8,21 +8,25 @@ summaries rather than full prompts, SQL text, retrieved chunks, or tool output.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
+from ..core.models import AuthUser
 from ..sql.engine import get_engine
-from .auth import _decode_local_token
+from .auth import require_admin, resolve_auth_user
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
+CurrentUserDep = Annotated[AuthUser, Depends(resolve_auth_user)]
 
-def _require_admin(token: str) -> None:
-    user = _decode_local_token(token)
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="admin permission required")
+
+def _require_admin(user: CurrentUserDep) -> AuthUser:
+    return require_admin(user)
+
+
+AdminUserDep = Annotated[AuthUser, Depends(_require_admin)]
 
 
 def _limit(value: int, maximum: int = 200) -> int:
@@ -67,8 +71,7 @@ def _summary_sql() -> str:
 
 
 @router.get("/overview", summary="管理员观测摘要")
-async def admin_overview(token: str) -> dict[str, Any]:
-    _require_admin(token)
+async def admin_overview(_: AdminUserDep) -> dict[str, Any]:
     engine = get_engine()
     with engine.connect() as conn:
         row = conn.execute(text(_summary_sql())).mappings().first() or {}
@@ -85,10 +88,9 @@ async def admin_overview(token: str) -> dict[str, Any]:
 
 @router.get("/conversations", summary="管理员查看会话摘要")
 async def admin_conversations(
-    token: str,
+    _: AdminUserDep,
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[dict[str, Any]]:
-    _require_admin(token)
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -128,10 +130,9 @@ async def admin_conversations(
 
 @router.get("/tool-logs", summary="管理员查看工具调用摘要")
 async def admin_tool_logs(
-    token: str,
+    _: AdminUserDep,
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[dict[str, Any]]:
-    _require_admin(token)
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -166,10 +167,9 @@ async def admin_tool_logs(
 
 @router.get("/audit-logs", summary="管理员查看系统审计摘要")
 async def admin_audit_logs(
-    token: str,
+    _: AdminUserDep,
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[dict[str, Any]]:
-    _require_admin(token)
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(

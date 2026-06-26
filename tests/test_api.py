@@ -84,6 +84,37 @@ def test_dev_login_returns_local_token(monkeypatch) -> None:
     from petrochat.app.core.config import get_settings
 
     monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("AUTH_SECRET_KEY", "test-secret")
+    get_settings.cache_clear()
+
+    resp = client.post("/api/auth/login", json={"username": "engineer", "password": "engineer"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["token"].count(".") == 2
+    assert data["user"]["role"] == "engineer"
+
+    me_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "engineer"
+
+    get_settings.cache_clear()
+
+
+def test_password_hash_verification(monkeypatch) -> None:
+    from petrochat.app.api.auth import _verify_password, hash_password
+    from petrochat.app.core.config import get_settings
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    get_settings.cache_clear()
+    hashed = hash_password("secret")
+    assert hashed.startswith("pbkdf2_sha256$")
+    assert _verify_password("secret", hashed) is True
+    assert _verify_password("wrong", hashed) is False
+
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("AUTH_ALLOW_PLAINTEXT_PASSWORDS", "false")
+    get_settings.cache_clear()
+    assert _verify_password("admin", "admin") is False
     get_settings.cache_clear()
 
 

@@ -9,10 +9,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
-from typing import Any
+import secrets
+import time
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from loguru import logger
 from sqlalchemy import text
 
@@ -77,24 +81,123 @@ def _make_user(row: dict[str, Any]) -> AuthUser:
     )
 
 
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode((value + "=" * (-len(value) % 4)).encode("ascii"))
+
+
+def _auth_secret() -> bytes:
+    return get_settings().auth_secret_key.get_secret_value().encode("utf-8")
+
+
 def _encode_local_token(user: AuthUser) -> str:
+    now = int(time.time())
+    expire_seconds = max(get_settings().auth_token_expire_minutes, 1) * 60
+    header = {"alg": "HS256", "typ": "JWT"}
     payload = {
+        "sub": user.user_id,
         "user_id": user.user_id,
         "username": user.username,
         "role": user.role,
         "authority_flag": user.authority_flag,
+        "iat": now,
+        "exp": now + expire_seconds,
     }
-    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    signing_input = ".".join(
+        [
+            _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8")),
+            _b64url_encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")),
+        ]
+    )
+    signature = hmac.new(_auth_secret(), signing_input.encode("ascii"), hashlib.sha256).digest()
+    return f"{signing_input}.{_b64url_encode(signature)}"
 
 
 def _decode_local_token(token: str) -> AuthUser:
     try:
-        padded = token + "=" * (-len(token) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        if token.count(".") != 2:
+            return _decode_legacy_token(token)
+        header_raw, payload_raw, signature_raw = token.split(".")
+        signing_input = f"{header_raw}.{payload_raw}"
+        expected = hmac.new(_auth_secret(), signing_input.encode("ascii"), hashlib.sha256).digest()
+        actual = _b64url_decode(signature_raw)
+        if not hmac.compare_digest(expected, actual):
+            raise ValueError("invalid token signature")
+        header = json.loads(_b64url_decode(header_raw).decode("utf-8"))
+        if header.get("alg") != "HS256":
+            raise ValueError("unsupported token algorithm")
+        payload = json.loads(_b64url_decode(payload_raw).decode("utf-8"))
+        if int(payload.get("exp") or 0) < int(time.time()):
+            raise ValueError("token expired")
         return _make_user(payload)
     except Exception as exc:
-        raise HTTPException(status_code=401, detail="invalid local token") from exc
+        raise HTTPException(status_code=401, detail="invalid or expired token") from exc
+
+
+def _decode_legacy_token(token: str) -> AuthUser:
+    if get_settings().app_env == "prod":
+        raise ValueError("legacy token disabled in prod")
+    payload = json.loads(_b64url_decode(token).decode("utf-8"))
+    return _make_user(payload)
+
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    value = (authorization or "").strip()
+    if not value:
+        return ""
+    scheme, _, token = value.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="invalid authorization header")
+    return token.strip()
+
+
+def resolve_auth_user(
+    token: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+) -> AuthUser:
+    raw_token = _extract_bearer_token(authorization) or (token or "").strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="missing token")
+    return _decode_local_token(raw_token)
+
+
+CurrentUserDep = Annotated[AuthUser, Depends(resolve_auth_user)]
+
+
+def require_admin(user: AuthUser) -> AuthUser:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="admin permission required")
+    return user
+
+
+def hash_password(password: str, *, iterations: int = 260_000) -> str:
+    salt = secrets.token_urlsafe(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return f"pbkdf2_sha256${iterations}${salt}${_b64url_encode(digest)}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    stored = str(stored or "")
+    if stored.startswith("pbkdf2_sha256$"):
+        try:
+            _, iterations_text, salt, expected_digest = stored.split("$", 3)
+            digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iterations_text),
+            )
+            return hmac.compare_digest(_b64url_encode(digest), expected_digest)
+        except Exception:
+            return False
+
+    settings = get_settings()
+    if settings.app_env == "prod" or not settings.auth_allow_plaintext_passwords:
+        return False
+    return hmac.compare_digest(password, stored)
 
 
 def _load_user_from_mysql(username: str, password: str) -> AuthUser | None:
@@ -103,15 +206,20 @@ def _load_user_from_mysql(username: str, password: str) -> AuthUser | None:
         row = conn.execute(
             text(
                 """
-                SELECT user_id, username, authority_flag
+                SELECT user_id, username, password, authority_flag
                 FROM `user`
-                WHERE username = :username AND password = :password
+                WHERE username = :username
                 LIMIT 1
                 """
             ),
-            {"username": username, "password": password},
+            {"username": username},
         ).mappings().first()
-    return _make_user(dict(row)) if row else None
+    if not row:
+        return None
+    row_data = dict(row)
+    if not _verify_password(password, str(row_data.get("password") or "")):
+        return None
+    return _make_user(row_data)
 
 
 def _load_dev_user(username: str, password: str) -> AuthUser | None:
@@ -150,5 +258,5 @@ async def login(req: LoginRequest) -> LoginResponse:
 
 
 @router.get("/me", response_model=AuthUser, summary="解析本地 token")
-async def me(token: str) -> AuthUser:
-    return _decode_local_token(token)
+async def me(user: CurrentUserDep) -> AuthUser:
+    return user
