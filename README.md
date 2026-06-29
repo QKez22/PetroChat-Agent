@@ -87,6 +87,7 @@ PetroChat-Agent/
 | 4 | Supervisor 多 Agent + NL2SQL + 报表 | 完成 | `v1.0-multiagent` |
 | 5 | 记忆管理 + Vue3 登录/RBAC 基础版 | 进行中 | 未 tag |
 | 10.1 | 评估质量门禁与管理员展示 | 完成基础版 | 未 tag |
+| 10.2 | 真实 Agent 回放基线 | 完成基础版 | 未 tag |
 
 ### Phase 1: RAG 问答
 
@@ -320,6 +321,12 @@ uv run python scripts/eval_golden_set.py --prediction-path data/eval_results/pre
 # 质量门禁失败时返回退出码 2，可用于 CI 或提交前检查
 uv run python scripts/eval_golden_set.py --prediction-path data/eval_results/predictions.jsonl --fail-on-gate
 
+# Phase 10.2 真实 Agent 回放基线：默认只生成计划，不调用模型
+uv run python scripts/run_agent_baseline.py
+
+# 显式执行真实 Agent 回放，最多 20 轮，并联动质量门禁
+uv run python scripts/run_agent_baseline.py --execute-agent --max-turns 20 --eval-user-id 1 --fail-on-gate
+
 # 查看最新评估摘要 API（需先生成 data/eval_results/golden_eval_summary.json）
 curl http://127.0.0.1:8000/api/evaluation/latest
 
@@ -418,6 +425,17 @@ curl http://127.0.0.1:8000/api/evaluation/latest
 ```
 
 详细说明见 [docs/Phase10.1-评估质量门禁.md](docs/Phase10.1-评估质量门禁.md)。
+
+## Phase 10.2 真实 Agent 回放基线
+
+新增 `scripts/run_agent_baseline.py`，用于从私有 Golden Set 中按场景稳定选择 10-20 组演示样例，并生成脱敏基线报告。默认 plan-only，不调用模型；显式 `--execute-agent` 后才调用真实 LangGraph Agent，并把 prediction JSONL、评估摘要和门禁结果写入本地 ignored 目录 `data/eval_results/agent_baseline/`。
+
+```powershell
+uv run python scripts/run_agent_baseline.py
+uv run python scripts/run_agent_baseline.py --execute-agent --max-turns 20 --fail-on-gate
+```
+
+详细说明见 [docs/Phase10.2-真实Agent回放基线.md](docs/Phase10.2-真实Agent回放基线.md)。
 
 ## License
 
