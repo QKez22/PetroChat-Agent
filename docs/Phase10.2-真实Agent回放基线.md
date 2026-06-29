@@ -2,7 +2,7 @@
 
 ## 目标
 
-在 Phase 10.1 的质量门禁基础上，固化一套“真实 Agent 小批量回放基线”。它不是提交私有样例，而是提交可复现的选择逻辑、运行命令和脱敏报告模板，让本地私有 Golden Set 可以稳定转化为面试可讲的评估闭环。
+在 Phase 10.1 的质量门禁基础上，固化一套“真实 Agent 小批量回放基线”。它不是提交私有样例，而是提交可复现的选择逻辑、运行命令和脱敏报告模板，让本地私有 Golden Set 可以稳定转化为可复核的评估闭环。
 
 ## 本阶段已实现
 
@@ -79,10 +79,10 @@ data/eval_results/agent_baseline/
 - prediction JSONL 可能包含真实问题、完整 SQL 或模型回答，只允许保存在本地 ignored 目录。
 - 如需把截图放入 README，应只截管理员聚合指标和门禁状态，不截原始问题正文。
 
-## 面试讲法
+## 项目讲解口径
 
 这一阶段可以说明项目具备真实回归能力：不是只靠离线 oracle，而是能在 DeepSeek、Chroma、MySQL 在线时选择一组固定样例，真实调用 Supervisor Agent，再通过 SQL 合约、RAG Recall/MRR、Memory Hit Rate 和质量门禁判断是否回归。
 
 ## 下一步
 
-Phase 10.3 建议做演示材料固化：在本地跑一次真实 baseline，整理脱敏指标截图、LangSmith trace 查询线索和 1 页项目演进故事，放入 `docs/Phase10.3-演示材料与面试讲法.md`。
+后续如需继续完善公开展示材料，可以在本地跑一次真实 baseline，整理脱敏指标截图、LangSmith trace 查询线索和项目演进说明，放入 ignored 的本地展示目录。

@@ -71,7 +71,7 @@ uv run python scripts/replay_golden_set.py --mode agent --limit 5 --evaluate
 - 当前门禁只基于聚合指标和 prediction JSONL，不暴露完整真实问题、完整 SQL、完整检索片段。
 - `profile-only` 表示只跑了 Golden Set 画像，没有 prediction 文件，不等价于真实 Agent 质量通过。
 
-## 面试讲法
+## 项目讲解口径
 
 这一阶段的价值在于把“可演示指标”推进到“可回归治理”。项目不只展示 RAG Recall、SQL 校验率和 Memory Hit Rate，还把这些指标固化为门禁：失败时 CLI 可返回非 0，管理员页面能看到未通过项，LangSmith trace 线索可以继续定位失败样例。
 

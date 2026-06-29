@@ -153,7 +153,7 @@ Remove-Item -Recurse -Force .\chroma_db
 
 ## 边界说明
 
-当前 compose 是个人项目演示环境，不是生产部署方案：
+当前 compose 是工程演示环境，不是生产部署方案：
 
 - MySQL demo 账号用于跑通前后端链路；生产应拆分业务只读账号与应用写入账号。
 - 前端由 Nginx 代理 `/api`、`/health` 和 `/config` 到 API 容器，SSE 已关闭代理缓冲。

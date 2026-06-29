@@ -1,7 +1,7 @@
 ## Imported Claude Cowork project instructions
 
 # 项目背景
-本项目是 PetroChat-Agent —— 石化领域智能问答与质检 Agent 平台，是一个用于学习 Agent 技术栈、可写进简历的个人项目。基于真实石化行业 Q&A 数据集，覆盖 RAG、Tool Calling、MCP、多 Agent 协作四大能力。目标岗位是 AI/LLM 应用研发方向。
+本项目是 PetroChat-Agent —— 石化领域智能问答与质检 Agent 平台，用于沉淀垂直领域 Agent 工程实践。项目基于石化行业问答与规范数据，覆盖 RAG、Tool Calling、MCP、多 Agent 协作四大能力，重点体现 LLM 应用工程中的检索、工具、数据问答、可观测性和评估闭环。
 
 # 技术栈（请严格遵守，不要擅自替换）
 - 语言：Python 3.12

@@ -1,6 +1,6 @@
 # Phase 5.9 评估展示报告
 
-本文用于固化 PetroChat-Agent 当前阶段可公开展示的评估结果、失败分析口径和面试演示截图清单。原始 Golden Set、prediction JSONL 和私有规范数据均位于本地 ignored 目录，不提交远程。
+本文用于固化 PetroChat-Agent 当前阶段可公开展示的评估结果、失败分析口径和演示截图清单。原始 Golden Set、prediction JSONL 和私有规范数据均位于本地 ignored 目录，不提交远程。
 
 ## 1. 评估范围
 
@@ -77,7 +77,7 @@ Phase 7.3 已把上述排查维度落到 `/api/evaluation/failures` 的结构化
 
 ## 6. 截图清单
 
-后续演示或简历材料建议补充以下截图，截图文件可放在 `docs/assets/`，但不要包含私有原文：
+后续公开展示材料建议补充以下截图，截图文件可放在 `docs/assets/`，但不要包含私有原文：
 
 | 截图 | 内容 | 用途 |
 | --- | --- | --- |
@@ -88,7 +88,7 @@ Phase 7.3 已把上述排查维度落到 `/api/evaluation/failures` 的结构化
 | `langsmith-supervisor-trace.png` | Supervisor 路由 trace | 展示 Agent 编排可观测性 |
 | `langsmith-sql-trace.png` | SQL 分支 trace | 展示 NL2SQL 排障链路 |
 
-## 7. 面试讲法
+## 7. 项目讲解口径
 
 可以这样讲：
 
