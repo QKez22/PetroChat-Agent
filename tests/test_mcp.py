@@ -46,3 +46,32 @@ def test_get_loaded_tools_before_init_raises() -> None:
     reset_for_testing()
     with pytest.raises(RuntimeError, match="未初始化"):
         get_loaded_tools()
+
+
+def test_graph_falls_back_to_local_tools_when_mcp_uninitialized(monkeypatch) -> None:
+    """MCP 开关打开但工具未初始化时，graph 构建应降级本地工具。"""
+    from petrochat.app.agent.graph import _resolve_tools, build_graph
+    from petrochat.app.core.config import get_settings
+    from petrochat.app.mcp.client import reset_for_testing
+    from petrochat.app.tools import ALL_TOOLS
+
+    monkeypatch.setenv("MCP_ENABLED", "true")
+    get_settings.cache_clear()
+    build_graph.cache_clear()
+    reset_for_testing()
+
+    assert _resolve_tools() == ALL_TOOLS
+
+
+def test_general_node_falls_back_to_local_tools_when_mcp_uninitialized(monkeypatch) -> None:
+    """MCP 缓存缺失时，general 节点取工具不应抛错。"""
+    from petrochat.app.agent.nodes.general_node import _current_tools
+    from petrochat.app.core.config import get_settings
+    from petrochat.app.mcp.client import reset_for_testing
+    from petrochat.app.tools import ALL_TOOLS
+
+    monkeypatch.setenv("MCP_ENABLED", "true")
+    get_settings.cache_clear()
+    reset_for_testing()
+
+    assert _current_tools() == ALL_TOOLS

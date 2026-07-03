@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from langchain_core.messages import SystemMessage
+from loguru import logger
 
 from ...core import AgentState, get_chat_llm, get_settings
 from ...tools import ALL_TOOLS as LOCAL_TOOLS
@@ -21,7 +22,10 @@ def _current_tools():
     s = get_settings()
     if s.mcp_enabled:
         from ...mcp import get_loaded_tools
-        return get_loaded_tools()
+        try:
+            return get_loaded_tools()
+        except Exception as exc:
+            logger.warning("MCP 工具不可用，general 节点降级使用本地工具: {}", exc)
     return LOCAL_TOOLS
 
 

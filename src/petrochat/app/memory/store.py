@@ -6,14 +6,15 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import text
+UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 
-from ..sql.engine import get_engine
+from ..sql.engine import get_app_engine as get_engine
 
 
 def _now_db() -> str:

@@ -14,10 +14,11 @@ import random
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import inspect, text
+UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 
 from .sql.engine import get_engine

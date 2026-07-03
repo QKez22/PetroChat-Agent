@@ -66,3 +66,26 @@ def list_tables() -> list[str]:
             "ORDER BY TABLE_NAME"
         ))
         return [r[0] for r in result]
+
+@lru_cache(maxsize=1)
+def get_app_engine() -> Engine:
+    """应用专属 MySQL 引擎（对 agent_* 表可写）。
+
+    与 get_engine() 的只读账号物理分离：业务库 NL2SQL 走 get_engine（只读），
+    memory / sessions / audit 走 get_app_engine（写 agent_* 表）。
+    未配置 MYSQL_APP_USER 时回退到只读账号 —— 开发期方便，但生产应配独立账号。
+    """
+    s = get_settings()
+    if not s.mysql_app_user:
+        logger.warning("MYSQL_APP_USER 未配置，memory/sessions 写库回退到只读账号")
+    engine = create_engine(
+        s.mysql_app_url,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        connect_args={"charset": "utf8mb4"},
+        future=True,
+    )
+    logger.info("MySQL 应用引擎已创建（写 agent_* 表）: user={}",
+                s.mysql_app_user or s.mysql_user)
+    return engine
+

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
+UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 

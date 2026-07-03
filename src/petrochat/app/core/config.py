@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     sql_timeout_seconds: int = Field(default=10)
     mysql_tables_whitelist: str = Field(default="affair,affair_task")
     mysql_enum_sample_threshold: int = Field(default=30)
+    mysql_app_user: str = Field(default="")
+    mysql_app_password: SecretStr = Field(default=SecretStr(""))
     auth_secret_key: SecretStr = Field(default=SecretStr("petrochat-dev-secret-change-me"))
     auth_token_expire_minutes: int = Field(default=480)
     auth_allow_plaintext_passwords: bool = Field(default=True)
@@ -97,6 +99,23 @@ class Settings(BaseSettings):
         pw = self.mysql_password.get_secret_value()
         return (
             f"mysql+pymysql://{self.mysql_user}:{pw}"
+            f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+            f"?charset=utf8mb4"
+        )
+
+
+    @property
+    def mysql_app_url(self) -> str:
+        """应用专属账号连接串（写 agent_* 表用，与只读账号分离）。
+
+        未配置时回退到 mysql_url（开发期方便，但生产应该用独立账号）。
+        """
+        user = self.mysql_app_user
+        if not user:
+            return self.mysql_url
+        pw = self.mysql_app_password.get_secret_value()
+        return (
+            f"mysql+pymysql://{user}:{pw}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
             f"?charset=utf8mb4"
         )

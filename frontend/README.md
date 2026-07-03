@@ -161,6 +161,22 @@ uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
 - Chroma 是否已启动并完成入库。
 - MySQL 是否可连接。
 - 当前问题是否触发了 NL2SQL 分支但数据库不可用。
+- 如果 `.env` 中 `MCP_ENABLED=true`，确认后端启动日志出现 `MCP 工具加载完成`；若没有，请重启后端。当前代码已支持 MCP 不可用时自动降级本地工具，但旧进程需要重启后才会加载该修复。
+
+### 7.4 问题一直显示“生成中”
+
+先看浏览器 Network 中 `/api/chat/stream` 的状态：
+
+- `pending`：后端 Agent/LLM 仍在执行，或旧后端进程未加载最新修复。重启后端后再试。
+- `500`：看后端终端 traceback，优先排查 API Key、Chroma、MySQL、MCP 初始化。
+- `/favicon.ico 404`：只是浏览器默认站点图标请求失败，不影响问答；前端已声明 `/favicon.svg`。
+
+推荐重启顺序：
+
+```powershell
+cd D:\Project\pythonProject\PetroChat-Agent
+uv run uvicorn petrochat.main:app --reload --host 127.0.0.1 --port 8000
+```
 
 ## 8. Git 提交命令
 

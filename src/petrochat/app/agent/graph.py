@@ -23,9 +23,12 @@ def _resolve_tools():
     s = get_settings()
     if s.mcp_enabled:
         from ..mcp import get_loaded_tools
-        tools = get_loaded_tools()
-        logger.info("graph 使用 MCP 工具: {} 个", len(tools))
-        return tools
+        try:
+            tools = get_loaded_tools()
+            logger.info("graph 使用 MCP 工具: {} 个", len(tools))
+            return tools
+        except Exception as exc:
+            logger.warning("MCP 工具不可用，graph 降级使用本地工具: {}", exc)
     logger.info("graph 使用本地工具: {} 个", len(LOCAL_TOOLS))
     return LOCAL_TOOLS
 
