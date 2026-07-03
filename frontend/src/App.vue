@@ -1142,6 +1142,12 @@ onMounted(async () => {
         <div>
           <h2>多 Agent 对话工作台</h2>
           <p>Supervisor 路由 / RAG / NL2SQL / Tool Calling</p>
+          <div class="pipeline-strip" aria-label="Agent pipeline">
+            <span><Server :size="14" /> Supervisor</span>
+            <span><FileText :size="14" /> RAG</span>
+            <span><Database :size="14" /> NL2SQL</span>
+            <span><Wrench :size="14" /> Tools</span>
+          </div>
           <small v-if="currentSessionId" class="session-hint">Session {{ currentSessionId.slice(0, 8) }}</small>
         </div>
         <button class="secondary-button" type="button" @click="resetConversation">
@@ -1155,6 +1161,17 @@ onMounted(async () => {
           <Activity :size="38" />
           <h3>开始一次石化领域问答</h3>
           <p>规范、事务、报表和工具调用会由 Supervisor 自动分流。</p>
+          <div class="empty-suggestions">
+            <button
+              v-for="item in examples"
+              :key="`empty-${item.text}`"
+              type="button"
+              @click="applyExample(item.text)"
+            >
+              <component :is="item.icon" :size="16" />
+              <span>{{ item.label }}</span>
+            </button>
+          </div>
         </div>
 
         <article v-for="message in messages" :key="message.id" class="message" :class="message.role">

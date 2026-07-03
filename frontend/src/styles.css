@@ -2004,6 +2004,372 @@ button {
   color: #176b61;
 }
 
+/* v1.1 visual refresh: Vue workbench shell, denser but warmer than the original plain panels. */
+body {
+  background:
+    linear-gradient(135deg, rgba(22, 107, 97, 0.08), transparent 34%),
+    linear-gradient(315deg, rgba(182, 122, 42, 0.10), transparent 38%),
+    #edf2f4;
+}
+
+.shell {
+  background: #eef3f4;
+}
+
+.sidebar {
+  position: relative;
+  overflow: hidden;
+  border-right-color: rgba(35, 55, 61, 0.12);
+  background:
+    linear-gradient(180deg, #fbfdfc 0%, #f2f7f5 54%, #eef4f2 100%);
+  box-shadow: 18px 0 44px rgba(24, 41, 47, 0.08);
+}
+
+.brand {
+  padding: 4px 2px 2px;
+}
+
+.brand-mark,
+.identity-avatar {
+  background: #116b61;
+  box-shadow: 0 10px 24px rgba(17, 107, 97, 0.22);
+}
+
+.brand h1 {
+  color: #13262a;
+  font-weight: 800;
+}
+
+.status-row,
+.identity-panel,
+.view-switch,
+.session-row,
+.example-button {
+  border-color: rgba(29, 54, 60, 0.12);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 30px rgba(27, 45, 52, 0.06);
+  backdrop-filter: blur(14px);
+}
+
+.status-row {
+  min-height: 44px;
+}
+
+.status-dot.online {
+  box-shadow: 0 0 0 5px rgba(22, 133, 95, 0.12);
+}
+
+.status-dot.offline {
+  box-shadow: 0 0 0 5px rgba(189, 63, 50, 0.12);
+}
+
+.icon-button,
+.tiny-button {
+  color: #294248;
+  background: #edf5f2;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.icon-button:hover,
+.tiny-button:hover {
+  color: #ffffff;
+  background: #176b61;
+  transform: translateY(-1px);
+}
+
+.view-switch {
+  gap: 4px;
+  padding: 5px;
+}
+
+.view-switch button {
+  min-height: 38px;
+  border-radius: 7px;
+  font-weight: 700;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.view-switch button.active {
+  background: #123f46;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.section-heading h2,
+.side-section h2 {
+  color: #415058;
+  letter-spacing: 0;
+}
+
+.session-row,
+.example-button {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.session-row:hover,
+.example-button:hover {
+  border-color: rgba(23, 107, 97, 0.35);
+  box-shadow: 0 14px 34px rgba(28, 48, 54, 0.10);
+  transform: translateY(-1px);
+}
+
+.session-row.active {
+  border-color: rgba(23, 107, 97, 0.55);
+  background: #f3fbf8;
+}
+
+.node-list span {
+  border: 1px solid rgba(29, 54, 60, 0.10);
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(27, 45, 52, 0.05);
+}
+
+.workspace,
+.login-workspace {
+  position: relative;
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(241, 246, 246, 0.92)),
+    repeating-linear-gradient(90deg, rgba(20, 43, 50, 0.035) 0 1px, transparent 1px 72px),
+    repeating-linear-gradient(0deg, rgba(20, 43, 50, 0.025) 0 1px, transparent 1px 72px);
+}
+
+.topbar {
+  min-height: 86px;
+  border-bottom-color: rgba(29, 54, 60, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 12px 32px rgba(29, 45, 52, 0.07);
+  backdrop-filter: blur(16px);
+}
+
+.topbar h2 {
+  color: #142a2e;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.topbar p {
+  color: #586971;
+}
+
+.session-hint {
+  padding: 3px 8px;
+  border: 1px solid rgba(23, 107, 97, 0.16);
+  border-radius: 7px;
+  background: #eff8f5;
+  color: #176b61;
+  font-weight: 700;
+}
+
+.pipeline-strip,
+.empty-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pipeline-strip span,
+.empty-suggestions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(29, 54, 60, 0.10);
+  border-radius: 7px;
+  color: #2d454b;
+  background: #f6faf8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pipeline-strip svg,
+.empty-suggestions svg {
+  color: #176b61;
+}
+
+.empty-suggestions {
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.empty-suggestions button {
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.empty-suggestions button:hover {
+  border-color: rgba(23, 107, 97, 0.36);
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.secondary-button {
+  border: 1px solid rgba(29, 54, 60, 0.10);
+  color: #17363b;
+  background: #f0f6f4;
+  font-weight: 700;
+}
+
+.secondary-button:hover {
+  background: #e1eeeb;
+}
+
+.chat-body {
+  padding: 28px 32px;
+  scroll-behavior: smooth;
+}
+
+.empty-state {
+  max-width: 760px;
+  min-height: 54vh;
+  margin: 0 auto;
+  padding: 40px 24px;
+  border: 1px dashed rgba(23, 107, 97, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.empty-state svg {
+  width: 46px;
+  height: 46px;
+  padding: 10px;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #176b61;
+  box-shadow: 0 14px 30px rgba(23, 107, 97, 0.18);
+}
+
+.empty-state h3 {
+  margin-top: 14px;
+  color: #173137;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.empty-state p {
+  max-width: 560px;
+  color: #586971;
+  line-height: 1.7;
+}
+
+.message {
+  grid-template-columns: 42px minmax(0, 1fr);
+  max-width: 1120px;
+  margin-bottom: 20px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-color: rgba(29, 54, 60, 0.12);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(27, 45, 52, 0.08);
+}
+
+.message.user .avatar {
+  color: #8a4b12;
+  background: #fff4da;
+}
+
+.message-main {
+  padding: 15px 17px;
+  border-color: rgba(29, 54, 60, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 34px rgba(28, 44, 51, 0.08);
+}
+
+.message.user .message-main {
+  border-color: rgba(176, 112, 28, 0.18);
+  background: #fff9ed;
+}
+
+.message-meta {
+  color: #61727a;
+}
+
+.inline-status {
+  padding: 2px 7px;
+  border-radius: 7px;
+  color: #176b61;
+  background: #e6f6f0;
+}
+
+.error-label {
+  padding: 2px 7px;
+  border-radius: 7px;
+  color: #bd3f32;
+  background: #fde9e4;
+}
+
+.markdown-body,
+.plain-text {
+  color: #1d2e34;
+  font-size: 15px;
+}
+
+.tool-event {
+  border: 1px solid rgba(44, 68, 76, 0.10);
+  background: #f3f7f6;
+}
+
+.tool-event svg {
+  color: #176b61;
+}
+
+.chart-panel {
+  border-color: rgba(29, 54, 60, 0.12);
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.citations span,
+.memory-badges span,
+.memory-badges strong {
+  border: 1px solid rgba(29, 54, 60, 0.08);
+}
+
+.composer {
+  align-items: stretch;
+  padding: 16px 32px 22px;
+  border-top-color: rgba(29, 54, 60, 0.12);
+  background: rgba(255, 255, 255, 0.90);
+  box-shadow: 0 -12px 32px rgba(29, 45, 52, 0.07);
+  backdrop-filter: blur(16px);
+}
+
+.composer textarea {
+  border-color: rgba(29, 54, 60, 0.16);
+  background: #fbfdfc;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.send-button,
+.stop-button {
+  min-width: 92px;
+  font-weight: 800;
+  box-shadow: 0 12px 26px rgba(23, 107, 97, 0.18);
+}
+
+.send-button {
+  background: #176b61;
+}
+
+.send-button:not(:disabled):hover {
+  background: #12574f;
+}
+
+.stop-button {
+  box-shadow: 0 12px 26px rgba(189, 63, 50, 0.18);
+}
+
+.login-panel {
+  border: 1px solid rgba(29, 54, 60, 0.12);
+  background: rgba(255, 255, 255, 0.90);
+  box-shadow: 0 24px 70px rgba(25, 45, 52, 0.14);
+  backdrop-filter: blur(16px);
+}
+
 @media (max-width: 900px) {
   .shell {
     grid-template-columns: 1fr;

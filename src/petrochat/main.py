@@ -18,10 +18,14 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_langsmith()
 
-    # 启用 MCP 时, 启动期一次性连接 MCP Server 并拉取工具列表
+    # 启用 MCP 时, 启动期一次性连接 MCP Server 并拉取工具列表。
+    # MCP 是工具暴露方式，不应成为普通问答的单点故障；失败时运行期会降级到本地工具。
     if settings.mcp_enabled:
         from petrochat.app.mcp import init_mcp_tools_async
-        await init_mcp_tools_async()
+        try:
+            await init_mcp_tools_async()
+        except Exception as exc:
+            logger.warning("MCP 工具启动初始化失败，将在运行期降级本地工具: {}", exc)
 
     logger.info("App ready: env={} mcp_enabled={} chroma={} chat_model={}",
                 settings.app_env, settings.mcp_enabled,
@@ -55,7 +59,7 @@ def create_app() -> FastAPI:
         return {
             "name": "PetroChat-Agent",
             "version": "1.0.0",
-            "stage": "phase-4: multi-agent supervisor",
+            "stage": "v1.0-multiagent",
             "docs": "/docs",
         }
 

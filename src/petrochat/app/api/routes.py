@@ -74,18 +74,18 @@ def _guess_route(state: dict, answer: str) -> str:
 # ============================================================
 @router.post("/chat", response_model=ChatResponse, summary="问答（非流式）")
 async def chat(req: ChatRequest) -> ChatResponse:
-    graph = build_graph()
-    store = get_conversation_store()
-    settings = get_settings()
-    session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
-    history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
-    memories, memory_context = recall_long_term_memories(
-        user_id=req.user_id,
-        question=req.question,
-        limit=settings.long_term_memory_limit,
-    )
     started_at = time.perf_counter()
     try:
+        graph = build_graph()
+        store = get_conversation_store()
+        settings = get_settings()
+        session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
+        history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
+        memories, memory_context = recall_long_term_memories(
+            user_id=req.user_id,
+            question=req.question,
+            limit=settings.long_term_memory_limit,
+        )
         result = await graph.ainvoke(
             build_initial_state(
                 req.question,
@@ -98,7 +98,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         )
     except Exception as e:
         logger.exception("graph.ainvoke 失败")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail=_friendly_error_message(e)) from e
 
     answer, citations = _extract_answer_and_citations(result)
     latency_ms = int((time.perf_counter() - started_at) * 1000)
@@ -128,6 +128,17 @@ def _sse(event: str, data: dict[str, Any]) -> dict[str, str]:
     return {"event": event, "data": json.dumps(data, ensure_ascii=False)}
 
 
+def _friendly_error_message(exc: Exception) -> str:
+    """把常见基础设施错误转成前端可读提示，详细堆栈仍保留在日志里。"""
+    raw = str(exc)
+    if "INSERT command denied" in raw and "agent_" in raw:
+        return (
+            "应用库账号没有 agent_* 表写权限。请配置 MYSQL_APP_USER/MYSQL_APP_PASSWORD，"
+            "或给应用账号授予 agent_conversation、agent_message 等应用表的 CRUD 权限。"
+        )
+    return raw
+
+
 async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], None]:
     """把 LangGraph 事件流翻译成 SSE 事件流。
 
@@ -139,29 +150,30 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
       done        流结束
       error       任一环节抛错
     """
-    graph = build_graph()
-    store = get_conversation_store()
-    settings = get_settings()
-    session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
-    history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
-    memories, memory_context = recall_long_term_memories(
-        user_id=req.user_id,
-        question=req.question,
-        limit=settings.long_term_memory_limit,
-    )
-    state = build_initial_state(
-        req.question,
-        session_id=session_id,
-        user_id=req.user_id,
-        history=history,
-        long_term_memories=[m.to_state() for m in memories],
-        long_term_context=memory_context,
-    )
     final_answer = ""
     route = "general"
     started_at = time.perf_counter()
 
     try:
+        graph = build_graph()
+        store = get_conversation_store()
+        settings = get_settings()
+        session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
+        history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
+        memories, memory_context = recall_long_term_memories(
+            user_id=req.user_id,
+            question=req.question,
+            limit=settings.long_term_memory_limit,
+        )
+        state = build_initial_state(
+            req.question,
+            session_id=session_id,
+            user_id=req.user_id,
+            history=history,
+            long_term_memories=[m.to_state() for m in memories],
+            long_term_context=memory_context,
+        )
+
         async for event in graph.astream_events(state, version="v2"):
             kind = event.get("event")
 
@@ -238,7 +250,7 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
 
     except Exception as e:
         logger.exception("SSE 流处理失败")
-        yield _sse("error", {"message": str(e)})
+        yield _sse("error", {"message": _friendly_error_message(e)})
 
 
 @router.post("/chat/stream", summary="问答（SSE 流式）")
