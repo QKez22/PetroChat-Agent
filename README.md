@@ -345,7 +345,7 @@ curl "http://127.0.0.1:8000/api/evaluation/runs?limit=10"
 
 ### 为什么 NL2SQL 不直接执行 LLM 产物？
 
-业务库查询必须可控。当前链路先用结构化输出生成 SQL，再用 `sqlglot` 做 AST 校验，只允许单条 SELECT，并拒绝系统库访问；执行阶段再用只读事务和 MySQL 原生超时兜底。
+业务库查询必须可控。当前链路先用结构化输出生成 SQL，再用 `sqlglot` 做 AST 校验，只允许单条 SELECT，拒绝系统库访问，并强制真实业务表落在 `MYSQL_TABLES_WHITELIST` 白名单内；执行阶段再用只读事务和 MySQL 原生超时兜底。
 
 ### 为什么 Phase 4 改成 NL2SQL + 报表？
 

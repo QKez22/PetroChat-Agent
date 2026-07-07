@@ -29,6 +29,16 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
+# ============== Documents / Office artifacts ==============
+# Keep Markdown docs in docs/, but do not commit local Word source files.
+*.doc
+*.docx
+*.docm
+*.dot
+*.dotx
+*.dotm
+~$*
+
 # 类型检查 / Lint 缓存
 .mypy_cache/
 .ruff_cache/

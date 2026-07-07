@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from petrochat.app.sql import validate_sql
+from petrochat.app.core.config import get_settings
 
 
 def test_valid_select_passes() -> None:
@@ -66,6 +67,24 @@ def test_information_schema_rejected() -> None:
     assert not r.ok
 
 
+def test_non_whitelisted_table_rejected() -> None:
+    r = validate_sql("SELECT * FROM user")
+    assert not r.ok
+    assert "非白名单表" in r.reason
+
+
+def test_join_non_whitelisted_table_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MYSQL_TABLES_WHITELIST", "affair")
+    get_settings.cache_clear()
+
+    r = validate_sql(
+        "SELECT a.affair_name, t.task_name "
+        "FROM affair a LEFT JOIN affair_task t ON a.affair_id = t.associated_affair_id"
+    )
+    assert not r.ok
+    assert "affair_task" in r.reason
+
+
 def test_syntax_error_rejected() -> None:
     r = validate_sql("SELEKT * FROM affair")
     assert not r.ok
@@ -91,6 +110,15 @@ def test_cte_query_valid() -> None:
         "SELECT COUNT(*) FROM running"
     )
     assert r.ok
+
+
+def test_cte_real_table_still_checked() -> None:
+    r = validate_sql(
+        "WITH running AS (SELECT * FROM user) "
+        "SELECT COUNT(*) FROM running"
+    )
+    assert not r.ok
+    assert "非白名单表" in r.reason
 
 
 def test_aggregation_valid() -> None:

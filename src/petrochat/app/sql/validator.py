@@ -4,7 +4,8 @@
   1. 单语句（多语句直接拒）
   2. 顶级必须是 SELECT（含 WITH ... SELECT，sqlglot 都归类为 Select）
   3. 引用的表不能落到系统库
-  4. LIMIT 自动注入 / 下钳
+  4. 引用的真实业务表必须在 MYSQL_TABLES_WHITELIST 内
+  5. LIMIT 自动注入 / 下钳
 """
 
 from __future__ import annotations
@@ -53,7 +54,15 @@ def validate_sql(raw_sql: str) -> ValidationResult:
             reason=f"只允许 SELECT 语句，收到: {type(parsed).__name__}",
         )
 
-    # 3) 表名不能落到系统库
+    settings = get_settings()
+    whitelist = {t.lower() for t in settings.mysql_whitelist}
+    cte_names = {
+        cte.alias_or_name.lower()
+        for cte in parsed.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+
+    # 3) 表名不能落到系统库；真实业务表必须在白名单内
     for tbl in parsed.find_all(exp.Table):
         db = (tbl.db or "").lower()
         if db in _FORBIDDEN_DBS:
@@ -66,9 +75,17 @@ def validate_sql(raw_sql: str) -> ValidationResult:
             return ValidationResult(
                 ok=False, sql=raw_sql, reason=f"禁止访问系统库: {name}",
             )
+        # sqlglot 会把 CTE 名称也表示为 Table 节点，这类临时名称不做业务表白名单校验。
+        if name in cte_names:
+            continue
+        if name and name not in whitelist:
+            return ValidationResult(
+                ok=False,
+                sql=raw_sql,
+                reason=f"禁止访问非白名单表: {name}",
+            )
 
-    # 4) LIMIT 注入 / 下钳
-    settings = get_settings()
+    # 5) LIMIT 注入 / 下钳
     cap = settings.sql_default_limit
     current_limit = parsed.args.get("limit")
     if current_limit is None:
