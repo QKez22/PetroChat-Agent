@@ -71,3 +71,21 @@ def test_initial_state_includes_long_term_memory_context() -> None:
     assert "用户长期记忆" in str(msgs[1].content)
     assert s["long_term_memories"][0]["id"] == "101"
     assert s["long_term_context"]
+
+
+def test_initial_state_includes_conversation_summary_before_recent_history() -> None:
+    s = build_initial_state(
+        "continue",
+        conversation_summary="- 已确认条件: refinery-one active tasks",
+        history=[
+            {"role": "user", "content": "recent question"},
+            {"role": "assistant", "content": "recent answer"},
+        ],
+    )
+    msgs = s["messages"]
+    assert len(msgs) == 5
+    assert isinstance(msgs[1], SystemMessage)
+    assert "会话滚动摘要" in str(msgs[1].content)
+    assert isinstance(msgs[2], HumanMessage)
+    assert msgs[2].content == "recent question"
+    assert s["conversation_summary"]

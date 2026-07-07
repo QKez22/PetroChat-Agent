@@ -20,6 +20,7 @@ UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 
 from ..sql.engine import get_app_engine as get_engine
+from .policy import validate_memory_candidate
 
 MemoryStatus = Literal["active", "disabled", "deleted"]
 MemoryEventType = Literal["created", "updated", "disabled", "deleted", "accessed"]
@@ -114,6 +115,7 @@ class LongTermMemoryStore:
             raise ValueError("content is required")
         if confidence < 0 or confidence > 1:
             raise ValueError("confidence must be between 0 and 1")
+        validate_memory_candidate(memory_type, content)
 
         now = _now_db()
         item = MemoryItem(
@@ -170,6 +172,7 @@ class LongTermMemoryStore:
                     "confidence": item.confidence,
                 },
             )
+        self._sync_mem0_created(item)
         return item
 
     def get_memory(self, memory_id: str) -> MemoryItem | None:
@@ -251,6 +254,7 @@ class LongTermMemoryStore:
         next_confidence = current.confidence if confidence is None else confidence
         if next_confidence < 0 or next_confidence > 1:
             raise ValueError("confidence must be between 0 and 1")
+        validate_memory_candidate(current.memory_type, next_content)
         next_metadata = current.metadata if metadata is None else metadata
         now = _now_db()
         with self._lock, self.engine.begin() as conn:
@@ -282,7 +286,10 @@ class LongTermMemoryStore:
                 reason=reason,
                 payload={"confidence": next_confidence},
             )
-        return self.get_memory(memory_id)
+        item = self.get_memory(memory_id)
+        if item is not None:
+            self._sync_mem0_updated(item)
+        return item
 
     def disable_memory(
         self,
@@ -318,6 +325,23 @@ class LongTermMemoryStore:
             ).mappings().all()
         return [self._row_to_event(row) for row in rows]
 
+    def list_active_memories_for_index(self, limit: int = 10_000) -> list[MemoryItem]:
+        with self._lock, self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, user_id, memory_type, content, source, confidence, status,
+                           metadata_json, created_at, updated_at, expires_at
+                    FROM user_memory
+                    WHERE status = 'active'
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": max(1, min(limit, 100_000))},
+            ).mappings().all()
+        return [self._row_to_item(row) for row in rows]
+
     def _set_status(
         self,
         memory_id: str,
@@ -351,7 +375,10 @@ class LongTermMemoryStore:
                 reason=reason,
                 payload={"previous_status": current.status, "status": status},
             )
-        return self.get_memory(memory_id)
+        item = self.get_memory(memory_id)
+        if item is not None:
+            self._sync_mem0_removed(item)
+        return item
 
     def _insert_event(
         self,
@@ -436,6 +463,21 @@ class LongTermMemoryStore:
         if isinstance(value, datetime):
             return value.strftime("%Y-%m-%d %H:%M:%S")
         return str(value)
+
+    def _sync_mem0_created(self, item: MemoryItem) -> None:
+        from .mem0_adapter import get_mem0_memory_adapter
+
+        get_mem0_memory_adapter().sync_created(item)
+
+    def _sync_mem0_updated(self, item: MemoryItem) -> None:
+        from .mem0_adapter import get_mem0_memory_adapter
+
+        get_mem0_memory_adapter().sync_updated(item)
+
+    def _sync_mem0_removed(self, item: MemoryItem) -> None:
+        from .mem0_adapter import get_mem0_memory_adapter
+
+        get_mem0_memory_adapter().sync_removed(item)
 
 
 @lru_cache(maxsize=1)

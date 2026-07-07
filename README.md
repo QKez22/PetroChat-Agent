@@ -69,7 +69,7 @@ PetroChat-Agent/
         │       ├── sql_node.py
         │       └── general_node.py
         ├── core/            # 配置 / 状态 / 实体 / LLM 客户端 / LangSmith
-        ├── memory/          # 会话持久化 + 短期滑动窗口
+        ├── memory/          # 会话持久化 + 短期窗口 + 滚动摘要 + 长期记忆
         ├── rag/             # 文档解析 / Chroma 原子操作 / Retriever
         ├── tools/           # LangChain 工具：换算、检索、查条款、查数据库
         ├── mcp/             # FastMCP Server + MCP Client
@@ -136,14 +136,18 @@ PetroChat-Agent/
 
 ### Phase 6: 长期记忆（进行中）
 
+- Mem0 memory flow: `petrochat_memory_candidates` runs `Mem0.add(..., infer=True)` for automatic candidate extraction; `MemoryPolicy` filters sensitive, duplicate, and low-value candidates; accepted memories are written to MySQL `user_memory` / `memory_event`; only MySQL active records are synced with `infer=False` into `petrochat_memories` for official semantic recall.
+- Recall flow: decide whether long-term memory is needed, search Mem0 active collection, take `memory_id` back to MySQL for status / user / type validation, then inject only validated active memories into the prompt.
 - 长期记忆数据模型：新增 MySQL `user_memory` / `memory_event`，用于保存用户偏好、常用业务条件和可审计记忆事件；缺表 SQL 见 `docs/sql/phase6_1_memory_tables.sql`。
 - 显式读写 API：新增 `/api/memory`，支持创建、列表、更新、禁用、软删除和查看审计事件。
 - 隔离边界：长期记忆按 `user_id` 隔离，带 `memory_type`、`source`、`confidence`、`status`、`expires_at` 和 `metadata`。
 - Agent 召回：调用前按 `user_id` 召回 active 长期记忆，和短期滑动窗口一起进入 LangGraph state；QA/SQL/General 三路节点都能看到记忆上下文。
 - 受控写入：问答结束后只在用户明确表达“记住、以后、默认、常用、我负责”等意图时写入候选记忆，默认用户 `default` 不写长期记忆。
-- 调用观测：非流式响应返回 `memory_used` / `memory_written`，SSE `meta` 返回 `long_term_count`、`long_term_memory_ids` 和 `memory_written_ids`。
+- 会话滚动摘要：新增 `agent_conversation_summary`，用 `summarized_until_message_id` 做摘要指针，旧消息不删库，只把最近窗口之外的候选区批量压缩后注入 prompt；建表 SQL 见 `docs/sql/phase11_context_summary_tables.sql`，旧表迁移见 `docs/sql/phase11_context_summary_migration.sql`。
+- Prompt 预算：默认模型窗口按 32k 估算，预留 4k 输出，应用层输入预算控制在 12k；超预算只裁剪本轮 prompt 注入内容，不删除 MySQL 历史。
+- 调用观测：非流式响应返回 `memory_used` / `memory_written` / `memory_recall`，SSE `meta` 返回 `long_term_count`、`long_term_memory_ids`、`memory_written_ids`、`conversation_summary_chars`、`prompt_estimated_tokens`、`dropped_history_count` 和 `memory_recall`。
 - 前端治理：Vue3 新增“记忆”工作区，支持查看长期记忆、手工写入、禁用、软删除和查看审计事件；管理员可输入目标 `user_id`，工程师默认管理自己的记忆。
-- 阶段边界：当前是规则版保守抽取、active 记忆召回和前端治理基础版，尚未接入 LLM 高级抽取、记忆冲突合并和生产级服务端鉴权。
+- 阶段边界：当前已接入 Mem0 自动候选抽取、active 记忆召回、MySQL 回表校验和前端治理基础版；后续重点是更细的冲突合并策略、访问审计频率控制和生产级权限收敛。
 
 当前路由策略：
 
@@ -223,6 +227,7 @@ notepad .env
 - `DEEPSEEK_API_KEY`
 - `DASHSCOPE_API_KEY`
 - `MYSQL_*` 只读账号信息
+- 可选：`MEM0_ENABLED=true` 开启 Mem0 自动候选抽取和正式语义召回；候选 collection 为 `petrochat_memory_candidates`，正式 active collection 为 `petrochat_memories`。
 
 ### 3. 启动 Chroma
 

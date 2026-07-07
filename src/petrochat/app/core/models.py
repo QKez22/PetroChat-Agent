@@ -85,6 +85,7 @@ class ChatResponse(BaseModel):
     session_id: str | None = None
     memory_used: list[str] = Field(default_factory=list)
     memory_written: list[str] = Field(default_factory=list)
+    memory_recall: dict = Field(default_factory=dict)
 
 
 class SessionSummary(BaseModel):

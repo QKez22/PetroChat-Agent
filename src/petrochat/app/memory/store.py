@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 
@@ -46,6 +46,23 @@ class StoredMessage:
     created_at: str
 
 
+@dataclass(frozen=True)
+class ConversationSummary:
+    conversation_id: str
+    summary_text: str
+    summarized_until_message_id: str | None
+    source_message_count: int
+    summary_version: int
+    created_at: str
+    updated_at: str
+
+    @property
+    def covered_message_id(self) -> str | None:
+        """Backward-compatible alias for the old summary pointer field."""
+
+        return self.summarized_until_message_id
+
+
 class ConversationStore:
     """Small MySQL store for conversation history.
 
@@ -56,6 +73,7 @@ class ConversationStore:
     def __init__(self, engine: Engine | None = None) -> None:
         self.engine = engine or get_engine()
         self._lock = threading.RLock()
+        self._summary_pointer_column: str | None = None
 
     def create_session(self, user_id: str = "default", title: str | None = None) -> str:
         session_id = _new_bigint_id()
@@ -242,6 +260,108 @@ class ConversationStore:
             ).mappings().all()
         return [self._row_to_message(row) for row in rows]
 
+    def get_summary(self, conversation_id: str) -> ConversationSummary | None:
+        pointer_column = self._summary_pointer_column_name()
+        with self._lock, self.engine.connect() as conn:
+            params = {"conversation_id": self._id_value(conversation_id)}
+            row = conn.execute(
+                text(
+                    f"""
+                    SELECT conversation_id, summary_text,
+                           {pointer_column} AS summarized_until_message_id,
+                           source_message_count, summary_version, created_at, updated_at
+                    FROM agent_conversation_summary
+                    WHERE conversation_id = :conversation_id
+                    LIMIT 1
+                    """
+                ),
+                params,
+            ).mappings().first()
+        return self._row_to_summary(row) if row else None
+
+    def upsert_summary(
+        self,
+        conversation_id: str,
+        *,
+        summary_text: str,
+        summarized_until_message_id: str | None,
+        source_message_count: int,
+    ) -> ConversationSummary:
+        now = _now_db()
+        conversation_key = self._id_value(conversation_id)
+        pointer_key = self._optional_id_value(summarized_until_message_id)
+        pointer_column = self._summary_pointer_column_name()
+        with self._lock, self.engine.begin() as conn:
+            current = conn.execute(
+                text(
+                    """
+                    SELECT summary_version
+                    FROM agent_conversation_summary
+                    WHERE conversation_id = :conversation_id
+                    LIMIT 1
+                    """
+                ),
+                {"conversation_id": conversation_key},
+            ).mappings().first()
+            params = {
+                "conversation_id": conversation_key,
+                "summary_text": summary_text,
+                "pointer_message_id": pointer_key,
+                "source_message_count": source_message_count,
+                "created_at": now,
+                "updated_at": now,
+            }
+            self._upsert_summary_with_pointer(
+                conn,
+                current=bool(current),
+                params=params,
+                pointer_column=pointer_column,
+            )
+        summary = self.get_summary(conversation_id)
+        if summary is None:
+            raise RuntimeError("conversation summary upsert failed")
+        return summary
+
+    def _upsert_summary_with_pointer(
+        self,
+        conn: Any,
+        *,
+        current: bool,
+        params: dict[str, Any],
+        pointer_column: str,
+    ) -> None:
+        if current:
+            conn.execute(
+                text(
+                    f"""
+                    UPDATE agent_conversation_summary
+                    SET summary_text = :summary_text,
+                        {pointer_column} = :pointer_message_id,
+                        source_message_count = :source_message_count,
+                        summary_version = summary_version + 1,
+                        updated_at = :updated_at
+                    WHERE conversation_id = :conversation_id
+                    """
+                ),
+                params,
+            )
+            return
+        conn.execute(
+            text(
+                f"""
+                INSERT INTO agent_conversation_summary(
+                    conversation_id, summary_text, {pointer_column},
+                    source_message_count, summary_version, created_at, updated_at
+                )
+                VALUES (
+                    :conversation_id, :summary_text, :pointer_message_id,
+                    :source_message_count, 1, :created_at, :updated_at
+                )
+                """
+            ),
+            params,
+        )
+
     def delete_session(self, conversation_id: str) -> bool:
         try:
             conversation_key = self._id_value(conversation_id)
@@ -273,6 +393,21 @@ class ConversationStore:
             created_at=self._stringify_time(row["created_at"]),
         )
 
+    def _row_to_summary(self, row: Any) -> ConversationSummary:
+        return ConversationSummary(
+            conversation_id=str(row["conversation_id"]),
+            summary_text=str(row["summary_text"] or ""),
+            summarized_until_message_id=(
+                str(row["summarized_until_message_id"])
+                if row["summarized_until_message_id"] is not None
+                else None
+            ),
+            source_message_count=int(row["source_message_count"] or 0),
+            summary_version=int(row["summary_version"] or 1),
+            created_at=self._stringify_time(row["created_at"]),
+            updated_at=self._stringify_time(row["updated_at"]),
+        )
+
     def _id_value(self, value: str | int) -> int:
         try:
             return int(value)
@@ -284,6 +419,26 @@ class ConversationStore:
             return int(value)
         except (TypeError, ValueError):
             return 0
+
+    def _optional_id_value(self, value: str | int | None) -> int | None:
+        if value is None or value == "":
+            return None
+        return self._id_value(value)
+
+    def _summary_pointer_column_name(self) -> str:
+        if self._summary_pointer_column:
+            return self._summary_pointer_column
+        try:
+            columns = {col["name"] for col in inspect(self.engine).get_columns("agent_conversation_summary")}
+        except Exception:
+            columns = {"summarized_until_message_id"}
+        if "summarized_until_message_id" in columns:
+            self._summary_pointer_column = "summarized_until_message_id"
+        elif "covered_message_id" in columns:
+            self._summary_pointer_column = "covered_message_id"
+        else:
+            self._summary_pointer_column = "summarized_until_message_id"
+        return self._summary_pointer_column
 
     def _stringify_time(self, value: Any) -> str:
         if isinstance(value, datetime):

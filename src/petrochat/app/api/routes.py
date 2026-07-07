@@ -30,8 +30,10 @@ from ..core.models import (
 )
 from ..memory import (
     StoredMessage,
+    fit_prompt_context,
     get_conversation_store,
     recall_long_term_memories,
+    refresh_conversation_summary,
     write_memory_candidates,
 )
 from .auth import CurrentUserDep
@@ -81,6 +83,47 @@ def _resolve_user_id(requested_user_id: str | None, user: CurrentUserDep) -> str
     return user.user_id
 
 
+def _memory_recall_summary(memories: list[Any]) -> dict[str, Any]:
+    mysql_count = sum(1 for mem in memories if getattr(mem, "recall_source", "") == "mysql")
+    mem0_count = sum(1 for mem in memories if getattr(mem, "recall_source", "") == "mem0")
+    ids = [getattr(mem, "memory_id", getattr(mem, "id", "")) for mem in memories]
+    return {
+        "total": len(memories),
+        "mysql": mysql_count,
+        "mem0": mem0_count,
+        "injected": len(memories),
+        "ids": ids,
+        "mysql_count": mysql_count,
+        "mem0_count": mem0_count,
+        "injected_count": len(memories),
+        "items": [
+            {
+                "memory_id": getattr(mem, "memory_id", getattr(mem, "id", "")),
+                "content": getattr(mem, "content", ""),
+                "source": getattr(mem, "recall_source", "mysql"),
+                "score": getattr(mem, "score", None),
+            }
+            for mem in memories
+        ],
+    }
+
+
+def _conversation_summary_text(store: Any, session_id: str) -> str:
+    try:
+        summary = store.get_summary(session_id)
+    except Exception as exc:
+        logger.warning("conversation summary load failed: {}", exc)
+        return ""
+    return summary.summary_text if summary else ""
+
+
+def _refresh_summary_after_turn(store: Any, session_id: str) -> None:
+    try:
+        refresh_conversation_summary(session_id, store=store)
+    except Exception as exc:
+        logger.warning("conversation summary refresh failed: {}", exc)
+
+
 # ============================================================
 # 非流式接口
 # ============================================================
@@ -94,19 +137,27 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
         user_id = _resolve_user_id(req.user_id, user)
         session_id = store.ensure_session(req.session_id, user_id=user_id, title=req.question[:80])
         history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
+        conversation_summary = _conversation_summary_text(store, session_id)
         memories, memory_context = recall_long_term_memories(
             user_id=user_id,
             question=req.question,
             limit=settings.long_term_memory_limit,
+        )
+        prompt_context = fit_prompt_context(
+            question=req.question,
+            history=history,
+            conversation_summary=conversation_summary,
+            long_term_context=memory_context,
         )
         result = await graph.ainvoke(
             build_initial_state(
                 req.question,
                 session_id=session_id,
                 user_id=user_id,
-                history=history,
+                history=prompt_context.history,
+                conversation_summary=prompt_context.conversation_summary,
                 long_term_memories=[m.to_state() for m in memories],
-                long_term_context=memory_context,
+                long_term_context=prompt_context.long_term_context,
             )
         )
     except Exception as e:
@@ -123,7 +174,8 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
         route=route,
         latency_ms=latency_ms,
     )
-    written = write_memory_candidates(user_id=user_id, question=req.question, route=route)
+    _refresh_summary_after_turn(store, session_id)
+    written = write_memory_candidates(user_id=user_id, question=req.question, answer=answer, route=route)
     return ChatResponse(
         answer=answer,
         citations=citations,
@@ -131,6 +183,11 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
         session_id=session_id,
         memory_used=[m.id for m in memories],
         memory_written=[m.id for m in written],
+        memory_recall={
+            **_memory_recall_summary(memories),
+            "prompt_estimated_tokens": prompt_context.estimated_tokens,
+            "dropped_history_count": prompt_context.dropped_history_count,
+        },
     )
 
 
@@ -174,18 +231,26 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
         user_id = _resolve_user_id(req.user_id, user)
         session_id = store.ensure_session(req.session_id, user_id=user_id, title=req.question[:80])
         history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
+        conversation_summary = _conversation_summary_text(store, session_id)
         memories, memory_context = recall_long_term_memories(
             user_id=user_id,
             question=req.question,
             limit=settings.long_term_memory_limit,
         )
+        prompt_context = fit_prompt_context(
+            question=req.question,
+            history=history,
+            conversation_summary=conversation_summary,
+            long_term_context=memory_context,
+        )
         state = build_initial_state(
             req.question,
             session_id=session_id,
             user_id=user_id,
-            history=history,
+            history=prompt_context.history,
+            conversation_summary=prompt_context.conversation_summary,
             long_term_memories=[m.to_state() for m in memories],
-            long_term_context=memory_context,
+            long_term_context=prompt_context.long_term_context,
         )
 
         async for event in graph.astream_events(state, version="v2"):
@@ -238,14 +303,20 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
                 route=route,
                 latency_ms=latency_ms,
             )
-        written = write_memory_candidates(user_id=user_id, question=req.question, route=route)
+            _refresh_summary_after_turn(store, session_id)
+        written = write_memory_candidates(user_id=user_id, question=req.question, answer=final_answer, route=route)
 
         meta: dict[str, Any] = {
             "citations": citations,
             "session_id": session_id,
-            "short_term_count": len(history),
+            "short_term_count": len(prompt_context.history),
+            "short_term_original_count": len(history),
+            "conversation_summary_chars": len(prompt_context.conversation_summary),
+            "prompt_estimated_tokens": prompt_context.estimated_tokens,
+            "dropped_history_count": prompt_context.dropped_history_count,
             "long_term_count": len(memories),
             "long_term_memory_ids": [m.id for m in memories],
+            "memory_recall": _memory_recall_summary(memories),
             "memory_written_ids": [m.id for m in written],
         }
 
