@@ -322,7 +322,7 @@ async function refreshSessions() {
   isLoadingSessions.value = true;
   sessionError.value = "";
   try {
-    sessions.value = await listSessions(currentUser.value.user_id, 30);
+    sessions.value = await listSessions(currentUser.value.user_id, 30, localToken.value);
   } catch (error) {
     sessionError.value = error.message || "会话加载失败";
   } finally {
@@ -432,6 +432,7 @@ async function refreshMemories() {
       status: memoryStatusFilter.value,
       q: memorySearchQuery.value.trim(),
       limit: 100,
+      token: localToken.value,
     });
     const visibleIds = new Set(memories.value.map((item) => item.id));
     selectedMemoryIds.value = selectedMemoryIds.value.filter((id) => visibleIds.has(id));
@@ -467,7 +468,7 @@ async function refreshMemoryEvents(memoryId = selectedMemoryId.value) {
   isLoadingMemoryEvents.value = true;
   memoryEventError.value = "";
   try {
-    memoryEvents.value = await getMemoryEvents(memoryId, 50);
+    memoryEvents.value = await getMemoryEvents(memoryId, 50, localToken.value);
   } catch (error) {
     memoryEvents.value = [];
     memoryEventError.value = error.message || "记忆审计加载失败";
@@ -484,7 +485,7 @@ async function refreshMemoryConflicts(memoryId = selectedMemoryId.value) {
   isLoadingMemoryConflicts.value = true;
   memoryConflictError.value = "";
   try {
-    memoryConflicts.value = await getMemoryConflicts(memoryId, 5);
+    memoryConflicts.value = await getMemoryConflicts(memoryId, 5, localToken.value);
   } catch (error) {
     memoryConflicts.value = [];
     memoryConflictError.value = error.message || "记忆冲突提示加载失败";
@@ -523,18 +524,21 @@ async function submitMemory() {
   }
   memoryError.value = "";
   try {
-    const created = await createMemory({
-      user_id: targetUserId,
-      memory_type: memoryForm.value.memory_type,
-      content: memoryForm.value.content.trim(),
-      source: "frontend_manual",
-      confidence: Number(memoryForm.value.confidence),
-      metadata: {
-        channel: "frontend_memory_governance",
-        operator_role: currentUser.value.role,
+    const created = await createMemory(
+      {
+        user_id: targetUserId,
+        memory_type: memoryForm.value.memory_type,
+        content: memoryForm.value.content.trim(),
+        source: "frontend_manual",
+        confidence: Number(memoryForm.value.confidence),
+        metadata: {
+          channel: "frontend_memory_governance",
+          operator_role: currentUser.value.role,
+        },
+        actor_id: currentUser.value.user_id,
       },
-      actor_id: currentUser.value.user_id,
-    });
+      localToken.value,
+    );
     memoryForm.value.content = "";
     await refreshMemories();
     selectedMemoryId.value = created.id;
@@ -550,7 +554,7 @@ async function disableSelectedMemory() {
   }
   memoryError.value = "";
   try {
-    await disableMemory(selectedMemory.value.id, currentUser.value.user_id, memoryActionReason.value);
+    await disableMemory(selectedMemory.value.id, currentUser.value.user_id, memoryActionReason.value, localToken.value);
     await refreshMemories();
   } catch (error) {
     memoryError.value = error.message || "长期记忆禁用失败";
@@ -567,6 +571,7 @@ async function disableSelectedMemories() {
       selectedMemoryIds.value,
       currentUser.value.user_id,
       memoryActionReason.value || "frontend batch disable",
+      localToken.value,
     );
     selectedMemoryIds.value = [];
     await refreshMemories();
@@ -581,7 +586,7 @@ async function deleteSelectedMemory() {
   }
   memoryError.value = "";
   try {
-    await deleteMemory(selectedMemory.value.id, currentUser.value.user_id, memoryActionReason.value);
+    await deleteMemory(selectedMemory.value.id, currentUser.value.user_id, memoryActionReason.value, localToken.value);
     await refreshMemories();
   } catch (error) {
     memoryError.value = error.message || "长期记忆删除失败";
@@ -709,7 +714,7 @@ async function openSession(sessionId) {
   }
   sessionError.value = "";
   try {
-    const detail = await getSession(sessionId, currentUser.value.user_id);
+    const detail = await getSession(sessionId, currentUser.value.user_id, localToken.value);
     messages.value = detail.messages.map(toChatMessage);
     setCurrentSession(detail.session.id);
     activeView.value = "chat";
@@ -725,7 +730,7 @@ async function removeSession(sessionId) {
   }
   sessionError.value = "";
   try {
-    await deleteSession(sessionId, currentUser.value.user_id);
+    await deleteSession(sessionId, currentUser.value.user_id, localToken.value);
     if (currentSessionId.value === sessionId) {
       messages.value = [];
       setCurrentSession(null);
@@ -927,13 +932,14 @@ async function sendQuestion() {
         },
       },
       controller.signal,
-      { sessionId: currentSessionId.value, userId: currentUser.value.user_id },
+      { sessionId: currentSessionId.value, userId: currentUser.value.user_id, token: localToken.value },
     );
 
     if (!assistant.content.trim()) {
       const fallback = await sendChat(question, controller.signal, {
         sessionId: currentSessionId.value,
         userId: currentUser.value.user_id,
+        token: localToken.value,
       });
       setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";

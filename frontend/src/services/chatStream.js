@@ -67,6 +67,7 @@ export async function streamChat(question, handlers, signal, options = {}) {
     headers: {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
+      ...authHeaders(options.token),
     },
     body: JSON.stringify({
       question,
@@ -114,7 +115,7 @@ export async function streamChat(question, handlers, signal, options = {}) {
 export async function sendChat(question, signal, options = {}) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders(options.token) },
     body: JSON.stringify({
       question,
       session_id: options.sessionId || null,
@@ -126,29 +127,34 @@ export async function sendChat(question, signal, options = {}) {
   return readJson(response);
 }
 
-export async function listSessions(userId, limit = 30) {
+export async function listSessions(userId, limit = 30, token = "") {
   const params = new URLSearchParams({
     user_id: userId || "default",
     limit: String(limit),
   });
-  const response = await fetch(`${API_BASE}/api/sessions?${params.toString()}`);
+  const response = await fetch(`${API_BASE}/api/sessions?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 
-export async function getSession(sessionId, userId) {
+export async function getSession(sessionId, userId, token = "") {
   const params = new URLSearchParams({
     user_id: userId || "default",
   });
-  const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params.toString()}`);
+  const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 
-export async function deleteSession(sessionId, userId) {
+export async function deleteSession(sessionId, userId, token = "") {
   const params = new URLSearchParams({
     user_id: userId || "default",
   });
   const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params.toString()}`, {
     method: "DELETE",
+    headers: authHeaders(token),
   });
   return readJson(response);
 }
@@ -223,23 +229,25 @@ export async function listMemories(userId, options = {}) {
   if (options.q) {
     params.set("q", options.q);
   }
-  const response = await fetch(`${API_BASE}/api/memory?${params.toString()}`);
+  const response = await fetch(`${API_BASE}/api/memory?${params.toString()}`, {
+    headers: authHeaders(options.token),
+  });
   return readJson(response);
 }
 
-export async function createMemory(payload) {
+export async function createMemory(payload, token = "") {
   const response = await fetch(`${API_BASE}/api/memory`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
     body: JSON.stringify(payload),
   });
   return readJson(response);
 }
 
-export async function disableMemory(memoryId, actorId, reason) {
+export async function disableMemory(memoryId, actorId, reason, token = "") {
   const response = await fetch(`${API_BASE}/api/memory/${memoryId}/disable`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
     body: JSON.stringify({
       actor_id: actorId || null,
       reason: reason || "frontend disable",
@@ -248,10 +256,10 @@ export async function disableMemory(memoryId, actorId, reason) {
   return readJson(response);
 }
 
-export async function batchDisableMemories(memoryIds, actorId, reason) {
+export async function batchDisableMemories(memoryIds, actorId, reason, token = "") {
   const response = await fetch(`${API_BASE}/api/memory/batch/disable`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
     body: JSON.stringify({
       memory_ids: memoryIds,
       actor_id: actorId || null,
@@ -261,7 +269,7 @@ export async function batchDisableMemories(memoryIds, actorId, reason) {
   return readJson(response);
 }
 
-export async function deleteMemory(memoryId, actorId, reason) {
+export async function deleteMemory(memoryId, actorId, reason, token = "") {
   const params = new URLSearchParams({
     reason: reason || "frontend delete",
   });
@@ -270,18 +278,23 @@ export async function deleteMemory(memoryId, actorId, reason) {
   }
   const response = await fetch(`${API_BASE}/api/memory/${memoryId}?${params.toString()}`, {
     method: "DELETE",
+    headers: authHeaders(token),
   });
   return readJson(response);
 }
 
-export async function getMemoryEvents(memoryId, limit = 50) {
+export async function getMemoryEvents(memoryId, limit = 50, token = "") {
   const params = new URLSearchParams({ limit: String(limit) });
-  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/events?${params.toString()}`);
+  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/events?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }
 
-export async function getMemoryConflicts(memoryId, limit = 5) {
+export async function getMemoryConflicts(memoryId, limit = 5, token = "") {
   const params = new URLSearchParams({ limit: String(limit) });
-  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/conflicts?${params.toString()}`);
+  const response = await fetch(`${API_BASE}/api/memory/${memoryId}/conflicts?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
   return readJson(response);
 }

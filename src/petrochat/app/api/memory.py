@@ -11,7 +11,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..core.models import AuthUser
 from ..memory import MemoryEvent, MemoryItem, get_long_term_memory_store
+from .auth import CurrentUserDep
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -140,8 +142,29 @@ def _conflict_score(current: MemoryItem, candidate: MemoryItem) -> tuple[float, 
     return 0, ""
 
 
+def _resolve_user_id(requested_user_id: str | None, user: AuthUser) -> str:
+    requested = (requested_user_id or "").strip()
+    if user.role == "admin" and requested:
+        return requested
+    if requested and requested != user.user_id:
+        raise HTTPException(status_code=403, detail="cannot access another user's memories")
+    return user.user_id
+
+
+def _ensure_memory_access(item: MemoryItem, user: AuthUser) -> None:
+    if user.role != "admin" and item.user_id != user.user_id:
+        raise HTTPException(status_code=403, detail="cannot access another user's memories")
+
+
+def _actor_id(req_actor_id: str | None, user: AuthUser) -> str:
+    if user.role == "admin" and req_actor_id:
+        return req_actor_id
+    return user.user_id
+
+
 @router.get("", response_model=list[MemoryResponse], summary="长期记忆列表")
 async def list_memories(
+    user: CurrentUserDep,
     user_id: str,
     status: Literal["active", "disabled", "deleted", "all"] = "active",
     memory_type: str | None = None,
@@ -149,9 +172,10 @@ async def list_memories(
     limit: int = 50,
 ) -> list[MemoryResponse]:
     store = get_long_term_memory_store()
+    target_user_id = _resolve_user_id(user_id, user)
     try:
         items = store.list_memories(
-            user_id=user_id,
+            user_id=target_user_id,
             status=status,
             memory_type=memory_type,
             q=q,
@@ -163,17 +187,18 @@ async def list_memories(
 
 
 @router.post("", response_model=MemoryResponse, summary="创建长期记忆")
-async def create_memory(req: MemoryCreateRequest) -> MemoryResponse:
+async def create_memory(req: MemoryCreateRequest, user: CurrentUserDep) -> MemoryResponse:
     store = get_long_term_memory_store()
+    target_user_id = _resolve_user_id(req.user_id, user)
     try:
         item = store.create_memory(
-            user_id=req.user_id,
+            user_id=target_user_id,
             memory_type=req.memory_type,
             content=req.content,
             source=req.source,
             confidence=req.confidence,
             metadata=req.metadata,
-            actor_id=req.actor_id,
+            actor_id=_actor_id(req.actor_id, user),
             expires_at=req.expires_at,
         )
     except ValueError as exc:
@@ -182,15 +207,19 @@ async def create_memory(req: MemoryCreateRequest) -> MemoryResponse:
 
 
 @router.patch("/{memory_id}", response_model=MemoryResponse, summary="更新长期记忆")
-async def update_memory(memory_id: str, req: MemoryUpdateRequest) -> MemoryResponse:
+async def update_memory(memory_id: str, req: MemoryUpdateRequest, user: CurrentUserDep) -> MemoryResponse:
     store = get_long_term_memory_store()
     try:
+        current = store.get_memory(memory_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        _ensure_memory_access(current, user)
         item = store.update_memory(
             memory_id,
             content=req.content,
             metadata=req.metadata,
             confidence=req.confidence,
-            actor_id=req.actor_id,
+            actor_id=_actor_id(req.actor_id, user),
             reason=req.reason,
         )
     except ValueError as exc:
@@ -201,7 +230,7 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest) -> MemoryRespo
 
 
 @router.post("/batch/disable", response_model=MemoryBatchActionResponse, summary="批量禁用长期记忆")
-async def batch_disable_memories(req: MemoryBatchActionRequest) -> MemoryBatchActionResponse:
+async def batch_disable_memories(req: MemoryBatchActionRequest, user: CurrentUserDep) -> MemoryBatchActionResponse:
     store = get_long_term_memory_store()
     updated: list[MemoryItem] = []
     missing: list[str] = []
@@ -211,9 +240,14 @@ async def batch_disable_memories(req: MemoryBatchActionRequest) -> MemoryBatchAc
             continue
         seen.add(memory_id)
         try:
+            current = store.get_memory(memory_id)
+            if current is None:
+                missing.append(memory_id)
+                continue
+            _ensure_memory_access(current, user)
             item = store.disable_memory(
                 memory_id,
-                actor_id=req.actor_id,
+                actor_id=_actor_id(req.actor_id, user),
                 reason=req.reason or "batch disable memory",
             )
         except ValueError as exc:
@@ -231,12 +265,13 @@ async def batch_disable_memories(req: MemoryBatchActionRequest) -> MemoryBatchAc
 
 
 @router.get("/{memory_id}/conflicts", response_model=list[MemoryConflictResponse], summary="长期记忆冲突提示")
-async def memory_conflicts(memory_id: str, limit: int = 5) -> list[MemoryConflictResponse]:
+async def memory_conflicts(memory_id: str, user: CurrentUserDep, limit: int = 5) -> list[MemoryConflictResponse]:
     store = get_long_term_memory_store()
     try:
         current = store.get_memory(memory_id)
         if current is None:
             raise HTTPException(status_code=404, detail="memory not found")
+        _ensure_memory_access(current, user)
         candidates = store.list_memories(
             user_id=current.user_id,
             status="active",
@@ -263,12 +298,16 @@ async def memory_conflicts(memory_id: str, limit: int = 5) -> list[MemoryConflic
 
 
 @router.post("/{memory_id}/disable", response_model=MemoryResponse, summary="禁用长期记忆")
-async def disable_memory(memory_id: str, req: MemoryActionRequest) -> MemoryResponse:
+async def disable_memory(memory_id: str, req: MemoryActionRequest, user: CurrentUserDep) -> MemoryResponse:
     store = get_long_term_memory_store()
     try:
+        current = store.get_memory(memory_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        _ensure_memory_access(current, user)
         item = store.disable_memory(
             memory_id,
-            actor_id=req.actor_id,
+            actor_id=_actor_id(req.actor_id, user),
             reason=req.reason or "disable memory",
         )
     except ValueError as exc:
@@ -281,12 +320,17 @@ async def disable_memory(memory_id: str, req: MemoryActionRequest) -> MemoryResp
 @router.delete("/{memory_id}", response_model=MemoryResponse, summary="软删除长期记忆")
 async def delete_memory(
     memory_id: str,
+    user: CurrentUserDep,
     actor_id: str | None = None,
     reason: str = "delete memory",
 ) -> MemoryResponse:
     store = get_long_term_memory_store()
     try:
-        item = store.delete_memory(memory_id, actor_id=actor_id, reason=reason)
+        current = store.get_memory(memory_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        _ensure_memory_access(current, user)
+        item = store.delete_memory(memory_id, actor_id=_actor_id(actor_id, user), reason=reason)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
@@ -295,11 +339,13 @@ async def delete_memory(
 
 
 @router.get("/{memory_id}/events", response_model=list[MemoryEventResponse], summary="长期记忆审计事件")
-async def list_memory_events(memory_id: str, limit: int = 50) -> list[MemoryEventResponse]:
+async def list_memory_events(memory_id: str, user: CurrentUserDep, limit: int = 50) -> list[MemoryEventResponse]:
     store = get_long_term_memory_store()
     try:
-        if store.get_memory(memory_id) is None:
+        current = store.get_memory(memory_id)
+        if current is None:
             raise HTTPException(status_code=404, detail="memory not found")
+        _ensure_memory_access(current, user)
         events = store.list_events(memory_id, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

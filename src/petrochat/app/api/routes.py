@@ -34,6 +34,7 @@ from ..memory import (
     recall_long_term_memories,
     write_memory_candidates,
 )
+from .auth import CurrentUserDep
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -69,20 +70,32 @@ def _guess_route(state: dict, answer: str) -> str:
     return "general"
 
 
+def _resolve_user_id(requested_user_id: str | None, user: CurrentUserDep) -> str:
+    """Resolve effective user id from JWT; admins may choose another user."""
+
+    requested = (requested_user_id or "").strip()
+    if user.role == "admin" and requested and requested != "default":
+        return requested
+    if requested and requested not in {"default", user.user_id}:
+        raise HTTPException(status_code=403, detail="cannot access another user's data")
+    return user.user_id
+
+
 # ============================================================
 # 非流式接口
 # ============================================================
 @router.post("/chat", response_model=ChatResponse, summary="问答（非流式）")
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
     started_at = time.perf_counter()
     try:
         graph = build_graph()
         store = get_conversation_store()
         settings = get_settings()
-        session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
+        user_id = _resolve_user_id(req.user_id, user)
+        session_id = store.ensure_session(req.session_id, user_id=user_id, title=req.question[:80])
         history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
         memories, memory_context = recall_long_term_memories(
-            user_id=req.user_id,
+            user_id=user_id,
             question=req.question,
             limit=settings.long_term_memory_limit,
         )
@@ -90,7 +103,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             build_initial_state(
                 req.question,
                 session_id=session_id,
-                user_id=req.user_id,
+                user_id=user_id,
                 history=history,
                 long_term_memories=[m.to_state() for m in memories],
                 long_term_context=memory_context,
@@ -110,7 +123,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         route=route,
         latency_ms=latency_ms,
     )
-    written = write_memory_candidates(user_id=req.user_id, question=req.question, route=route)
+    written = write_memory_candidates(user_id=user_id, question=req.question, route=route)
     return ChatResponse(
         answer=answer,
         citations=citations,
@@ -139,7 +152,7 @@ def _friendly_error_message(exc: Exception) -> str:
     return raw
 
 
-async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], None]:
+async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerator[dict[str, str], None]:
     """把 LangGraph 事件流翻译成 SSE 事件流。
 
     SSE 事件类型：
@@ -158,17 +171,18 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
         graph = build_graph()
         store = get_conversation_store()
         settings = get_settings()
-        session_id = store.ensure_session(req.session_id, user_id=req.user_id, title=req.question[:80])
+        user_id = _resolve_user_id(req.user_id, user)
+        session_id = store.ensure_session(req.session_id, user_id=user_id, title=req.question[:80])
         history = _to_history_payload(store.recent_messages(session_id, settings.short_term_turns))
         memories, memory_context = recall_long_term_memories(
-            user_id=req.user_id,
+            user_id=user_id,
             question=req.question,
             limit=settings.long_term_memory_limit,
         )
         state = build_initial_state(
             req.question,
             session_id=session_id,
-            user_id=req.user_id,
+            user_id=user_id,
             history=history,
             long_term_memories=[m.to_state() for m in memories],
             long_term_context=memory_context,
@@ -224,7 +238,7 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
                 route=route,
                 latency_ms=latency_ms,
             )
-        written = write_memory_candidates(user_id=req.user_id, question=req.question, route=route)
+        written = write_memory_candidates(user_id=user_id, question=req.question, route=route)
 
         meta: dict[str, Any] = {
             "citations": citations,
@@ -254,20 +268,30 @@ async def _stream_events(req: ChatRequest) -> AsyncGenerator[dict[str, str], Non
 
 
 @router.post("/chat/stream", summary="问答（SSE 流式）")
-async def chat_stream(req: ChatRequest) -> EventSourceResponse:
-    return EventSourceResponse(_stream_events(req))
+async def chat_stream(req: ChatRequest, user: CurrentUserDep) -> EventSourceResponse:
+    return EventSourceResponse(_stream_events(req, user))
 
 
 @router.get("/sessions", response_model=list[SessionSummary], summary="会话列表")
-async def list_sessions(user_id: str = "default", limit: int = 30) -> list[SessionSummary]:
+async def list_sessions(
+    user: CurrentUserDep,
+    user_id: str = "default",
+    limit: int = 30,
+) -> list[SessionSummary]:
     store = get_conversation_store()
-    return [SessionSummary(**row) for row in store.list_sessions(user_id=user_id, limit=limit)]
+    target_user_id = _resolve_user_id(user_id, user)
+    return [SessionSummary(**row) for row in store.list_sessions(user_id=target_user_id, limit=limit)]
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetail, summary="会话详情")
-async def get_session(session_id: str, user_id: str = "default") -> SessionDetail:
+async def get_session(
+    session_id: str,
+    user: CurrentUserDep,
+    user_id: str = "default",
+) -> SessionDetail:
     store = get_conversation_store()
-    sessions = [row for row in store.list_sessions(user_id=user_id, limit=500) if row["id"] == session_id]
+    target_user_id = _resolve_user_id(user_id, user)
+    sessions = [row for row in store.list_sessions(user_id=target_user_id, limit=500) if row["id"] == session_id]
     if not sessions:
         raise HTTPException(status_code=404, detail="session not found")
     messages = [
@@ -286,12 +310,16 @@ async def get_session(session_id: str, user_id: str = "default") -> SessionDetai
 
 
 @router.delete("/sessions/{session_id}", summary="删除会话")
-async def delete_session(session_id: str, user_id: str | None = None) -> dict[str, bool]:
+async def delete_session(
+    session_id: str,
+    user: CurrentUserDep,
+    user_id: str | None = None,
+) -> dict[str, bool]:
     store = get_conversation_store()
-    if user_id:
-        sessions = [row for row in store.list_sessions(user_id=user_id, limit=500) if row["id"] == session_id]
-        if not sessions:
-            raise HTTPException(status_code=404, detail="session not found")
+    target_user_id = _resolve_user_id(user_id, user)
+    sessions = [row for row in store.list_sessions(user_id=target_user_id, limit=500) if row["id"] == session_id]
+    if not sessions:
+        raise HTTPException(status_code=404, detail="session not found")
     deleted = store.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="session not found")

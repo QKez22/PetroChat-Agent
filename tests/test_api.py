@@ -12,18 +12,39 @@ from petrochat.main import app
 client = TestClient(app)
 
 
+def auth_headers(user_id: str = "2", role: str = "engineer") -> dict[str, str]:
+    from petrochat.app.api.auth import _encode_local_token
+    from petrochat.app.core.models import AuthUser
+
+    authority_flag = 1 if role == "admin" else 0
+    username = "admin" if role == "admin" else "engineer"
+    user = AuthUser(
+        user_id=user_id,
+        username=username,
+        role=role,  # type: ignore[arg-type]
+        authority_flag=authority_flag,
+        permissions=[],
+    )
+    return {"Authorization": f"Bearer {_encode_local_token(user)}"}
+
+
 def test_health_still_works() -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
 
 
+def test_chat_requires_token() -> None:
+    resp = client.post("/api/chat", json={"question": "hello"})
+    assert resp.status_code == 401
+
+
 def test_chat_validates_empty_question() -> None:
-    resp = client.post("/api/chat", json={"question": ""})
+    resp = client.post("/api/chat", json={"question": ""}, headers=auth_headers())
     assert resp.status_code == 422
 
 
 def test_chat_validates_long_question() -> None:
-    resp = client.post("/api/chat", json={"question": "x" * 2001})
+    resp = client.post("/api/chat", json={"question": "x" * 2001}, headers=auth_headers())
     assert resp.status_code == 422
 
 
@@ -384,11 +405,19 @@ def test_delete_session_checks_user_id(monkeypatch) -> None:
     session_id = store.create_session(user_id="1", title="owned by u1")
     store.append_turn(session_id, "hello", "world")
 
-    denied = client.delete(f"/api/sessions/{session_id}", params={"user_id": "2"})
-    assert denied.status_code == 404
+    denied = client.delete(
+        f"/api/sessions/{session_id}",
+        params={"user_id": "1"},
+        headers=auth_headers(user_id="2"),
+    )
+    assert denied.status_code == 403
     assert store.list_messages(session_id)
 
-    allowed = client.delete(f"/api/sessions/{session_id}", params={"user_id": "1"})
+    allowed = client.delete(
+        f"/api/sessions/{session_id}",
+        params={"user_id": "1"},
+        headers=auth_headers(user_id="1"),
+    )
     assert allowed.status_code == 200
     assert allowed.json() == {"deleted": True}
 
@@ -402,6 +431,7 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
     engine = make_memory_test_engine()
     monkeypatch.setattr(long_term_module, "get_engine", lambda: engine)
     get_long_term_memory_store.cache_clear()
+    headers = auth_headers(user_id="1", role="admin")
 
     create_resp = client.post(
         "/api/memory",
@@ -414,13 +444,14 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
             "metadata": {"department": "炼油一部"},
             "actor_id": "1",
         },
+        headers=headers,
     )
     assert create_resp.status_code == 200
     item = create_resp.json()
     assert item["status"] == "active"
     assert item["metadata"]["department"] == "炼油一部"
 
-    list_resp = client.get("/api/memory", params={"user_id": "1"})
+    list_resp = client.get("/api/memory", params={"user_id": "1"}, headers=headers)
     assert list_resp.status_code == 200
     assert [row["id"] for row in list_resp.json()] == [item["id"]]
 
@@ -431,6 +462,7 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
             "confidence": 0.8,
             "actor_id": "1",
         },
+        headers=headers,
     )
     assert update_resp.status_code == 200
     assert update_resp.json()["confidence"] == 0.8
@@ -446,6 +478,7 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
             "metadata": {"department": "refinery-one"},
             "actor_id": "1",
         },
+        headers=headers,
     ).json()
     similar_b = client.post(
         "/api/memory",
@@ -458,13 +491,14 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
             "metadata": {"department": "refinery-one"},
             "actor_id": "1",
         },
+        headers=headers,
     ).json()
 
-    search_resp = client.get("/api/memory", params={"user_id": "1", "q": "refinery-one"})
+    search_resp = client.get("/api/memory", params={"user_id": "1", "q": "refinery-one"}, headers=headers)
     assert search_resp.status_code == 200
     assert {row["id"] for row in search_resp.json()} >= {similar_a["id"], similar_b["id"]}
 
-    conflicts_resp = client.get(f"/api/memory/{similar_a['id']}/conflicts")
+    conflicts_resp = client.get(f"/api/memory/{similar_a['id']}/conflicts", headers=headers)
     assert conflicts_resp.status_code == 200
     assert conflicts_resp.json()[0]["memory"]["id"] == similar_b["id"]
     assert conflicts_resp.json()[0]["score"] > 0
@@ -476,6 +510,7 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
             "actor_id": "1",
             "reason": "batch governance",
         },
+        headers=headers,
     )
     assert batch_resp.status_code == 200
     assert batch_resp.json()["requested"] == 3
@@ -484,12 +519,13 @@ def test_long_term_memory_api_lifecycle(monkeypatch) -> None:
 
     disable_resp = client.post(
         f"/api/memory/{item['id']}/disable",
+        headers=headers,
         json={"actor_id": "1", "reason": "用户要求暂停"},
     )
     assert disable_resp.status_code == 200
     assert disable_resp.json()["status"] == "disabled"
 
-    events_resp = client.get(f"/api/memory/{item['id']}/events")
+    events_resp = client.get(f"/api/memory/{item['id']}/events", headers=headers)
     assert events_resp.status_code == 200
     assert [row["event_type"] for row in events_resp.json()] == ["created", "updated", "disabled"]
 
