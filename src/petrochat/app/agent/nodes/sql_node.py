@@ -14,9 +14,9 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 
 from ...core import AgentState
-from ...memory import augment_question_with_memory
 from ...report import render_report
 from ...sql import nl2sql
+from ...sql.hints import build_sql_question_with_hints
 
 
 def sql_node(state: AgentState) -> dict:
@@ -25,8 +25,13 @@ def sql_node(state: AgentState) -> dict:
     if not question:
         return {"messages": [AIMessage(content="请提供问题。")]}
 
-    sql_question = augment_question_with_memory(question, state.get("long_term_context", ""))
+    sql_question = build_sql_question_with_hints(
+        question,
+        history=state.get("short_term_messages", []),
+        long_term_context=state.get("long_term_context", ""),
+    )
     result = nl2sql(sql_question)
+    result_payload = result.as_dict()
 
     if not result.ok:
         parts = [f"❌ 查询失败（阶段：{result.stage}）"]
@@ -34,7 +39,7 @@ def sql_node(state: AgentState) -> dict:
             parts.append(f"**生成的 SQL:**\n```sql\n{result.sql}\n```")
         parts.append(f"**错误:** {result.error}")
         logger.warning("sql_node 失败: {}", result.error)
-        return {"messages": [AIMessage(content="\n\n".join(parts))]}
+        return {"messages": [AIMessage(content="\n\n".join(parts))], "sql_result": result_payload}
 
     df = pd.DataFrame(result.rows, columns=result.columns)
     report = render_report(df, title=question, with_chart=True, max_rows=50)
@@ -52,4 +57,4 @@ def sql_node(state: AgentState) -> dict:
         f"**结果（{result.row_count} 行）:**\n{report.markdown}"
         f"{chart_note}"
     )
-    return {"messages": [AIMessage(content=content)]}
+    return {"messages": [AIMessage(content=content)], "sql_result": result_payload}

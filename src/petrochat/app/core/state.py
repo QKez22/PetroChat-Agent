@@ -24,6 +24,7 @@ class AgentState(TypedDict, total=False):
     retrieved: list[dict[str, Any]]
     answer: str
     citations: list[str]
+    sql_result: dict[str, Any]
     score: dict[str, Any]
     intent: str
     next: NextNode

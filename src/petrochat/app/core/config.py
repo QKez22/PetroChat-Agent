@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -57,6 +58,10 @@ class Settings(BaseSettings):
     mysql_password: SecretStr = Field(default=SecretStr(""))
     sql_default_limit: int = Field(default=1000)
     sql_timeout_seconds: int = Field(default=10)
+    sql_pipeline_mode: Literal["legacy", "optimized"] = Field(default="legacy")
+    sql_schema_narrowing_max_tables: int = Field(default=2)
+    sql_schema_narrowing_max_columns_per_table: int = Field(default=18)
+    sql_repair_max_attempts: int = Field(default=1)
     mysql_tables_whitelist: str = Field(default="affair,affair_task")
     mysql_enum_sample_threshold: int = Field(default=30)
     mysql_app_user: str = Field(default="")
