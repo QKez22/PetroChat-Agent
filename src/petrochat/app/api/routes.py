@@ -67,6 +67,9 @@ def _guess_route(state: dict, answer: str) -> str:
     nxt = state.get("next")
     if nxt in {"qa", "sql", "general"}:
         return str(nxt)
+    # 循环 supervisor FINISH 后 next 不反映实际路由，按 state 产出推断
+    if state.get("sql_result"):
+        return "sql"
     if state.get("retrieved") or _CITATION_PAT.findall(answer):
         return "qa"
     return "general"

@@ -39,6 +39,22 @@ def _latest_answer(state: dict[str, Any]) -> str:
     return ""
 
 
+def _guess_route(state: dict[str, Any]) -> str:
+    """从 state 推断路由标签。
+
+    循环 supervisor FINISH 后 next="FINISH"，不反映实际经过的 worker，
+    按 state 里的产出（sql_result / retrieved）推断主路由。
+    """
+    nxt = state.get("next")
+    if nxt in {"qa", "sql", "general"}:
+        return str(nxt)
+    if state.get("sql_result"):
+        return "sql"
+    if state.get("retrieved"):
+        return "qa"
+    return "general"
+
+
 def _extract_sql(answer: str) -> str:
     match = SQL_BLOCK_PATTERN.search(answer or "")
     return match.group(1).strip() if match else ""
@@ -172,7 +188,7 @@ async def _agent_predictions(
                 answer = _latest_answer(state)
                 status = "ok"
                 error = ""
-                route = state.get("next") or "general"
+                route = _guess_route(state)
                 retrieved = _retrieved_payload(state)
                 sql = _extract_sql(answer)
                 sql_result = state.get("sql_result") or {}

@@ -11,7 +11,7 @@
 
 - **垂直领域护城河**：基于 4 份石化规范文档构建 1500+ chunks 知识库，并接入事务/任务业务库，避免通用聊天项目的同质化。
 - **阶段化工程演进**：从单节点 RAG 起步，逐步扩展到 Tool Calling、MCP Server、Supervisor 多 Agent，再到记忆管理与 Vue3 登录/RBAC 工作台。
-- **多 Agent 路由闭环**：`supervisor` 根据意图路由到 `qa`、`sql`、`general` 三个子 agent，让规范问答、数据查询、复合工具任务职责清晰。
+- **循环多 Agent 路由**：`supervisor` 根据意图分派 `qa`、`sql`、`general` 三个子 agent，worker 执行完回 supervisor 评估是否继续分派（支持多意图任务），FINISH 结束循环。
 - **安全 NL2SQL**：使用 DeepSeek function calling 生成 SQL，`sqlglot` AST 校验只允许单条 SELECT，自动注入 LIMIT，并用 MySQL `MAX_EXECUTION_TIME` 控制慢查询。
 - **可演示报表输出**：SQL 查询结果自动转 Markdown 表，适合的数据生成 base64 PNG 图表，通过 SSE `meta` 事件传给前端。
 - **工程可观测与可测试**：LangSmith 链路追踪、FastAPI SSE 流式输出、Golden Set 回放/评估脚本和 90+ 个 pytest 测试覆盖核心逻辑。
@@ -21,7 +21,7 @@
 | 模块 | 选型 |
 | --- | --- |
 | 语言 | Python 3.12 |
-| Agent 编排 | LangGraph StateGraph（Supervisor 模式） |
+| Agent 编排 | LangGraph StateGraph（循环 Supervisor 模式） |
 | LLM 应用框架 | LangChain |
 | Web 框架 | FastAPI + SSE |
 | 前端 | Vue3 + Vite + fetch SSE + Markdown 渲染 |
@@ -157,11 +157,12 @@ flowchart LR
     SUP -->|"规范/概念/条款"| QA["qa_node: RAG 问答"]
     SUP -->|"事务/任务/统计"| SQL["sql_node: NL2SQL + 报表"]
     SUP -->|"复合/换算/兜底"| GEN["general_node: ReAct 工具循环"]
+    SUP -->|"任务完成"| END["END"]
     GEN -->|"需要工具"| TOOLS["ToolNode"]
     TOOLS --> GEN
-    QA --> END["END"]
-    SQL --> END
-    GEN --> END
+    QA --> SUP
+    SQL --> SUP
+    GEN -->|"无需工具"| SUP
 ```
 
 ## API

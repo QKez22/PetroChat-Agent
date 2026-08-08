@@ -29,3 +29,4 @@ class AgentState(TypedDict, total=False):
     intent: str
     next: NextNode
     retry_count: int
+    supervisor_step: int

@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 from loguru import logger
 
 from ..core import AgentState, get_settings
@@ -34,10 +34,23 @@ def _resolve_tools():
 
 
 def _route_after_supervisor(state: AgentState) -> str:
-    nxt = state.get("next", "general")
+    nxt = state.get("next", "FINISH")
+    if nxt == "FINISH":
+        return END
     if nxt not in {"qa", "sql", "general"}:
         return "general"
     return nxt
+
+
+def _route_after_general(state: AgentState) -> str:
+    """general 执行后：有 tool_calls 去 tools，否则回 supervisor 评估是否结束。"""
+    messages = state.get("messages") or []
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage):
+            if getattr(msg, "tool_calls", None):
+                return "tools"
+            return "supervisor"
+    return "supervisor"
 
 
 @lru_cache(maxsize=1)
@@ -56,11 +69,16 @@ def build_graph():
     builder.add_conditional_edges(
         "supervisor",
         _route_after_supervisor,
-        {"qa": "qa", "sql": "sql", "general": "general"},
+        {"qa": "qa", "sql": "sql", "general": "general", END: END},
     )
-    builder.add_edge("qa", END)
-    builder.add_edge("sql", END)
-    builder.add_conditional_edges("general", tools_condition)
+    # worker 执行完回 supervisor（而非直接 END），让 supervisor 评估是否还需要继续分派
+    builder.add_edge("qa", "supervisor")
+    builder.add_edge("sql", "supervisor")
+    builder.add_conditional_edges(
+        "general",
+        _route_after_general,
+        {"tools": "tools", "supervisor": "supervisor"},
+    )
     builder.add_edge("tools", "general")
     return builder.compile()
 
