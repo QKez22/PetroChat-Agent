@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import io
+from threading import Lock
 from typing import Literal
 
 import matplotlib
@@ -29,6 +30,7 @@ matplotlib.rcParams["font.sans-serif"] = [
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 ChartKind = Literal["auto", "bar", "line", "pie", "none"]
+_RENDER_LOCK = Lock()
 
 
 def suggest_chart_type(df: pd.DataFrame) -> str:
@@ -65,6 +67,16 @@ def suggest_chart_type(df: pd.DataFrame) -> str:
 
 
 def render_chart(
+    df: pd.DataFrame,
+    kind: ChartKind = "auto",
+    title: str = "",
+) -> tuple[str | None, str]:
+    # pyplot 有进程级状态, 仅串行化绘图部分以防并发请求交叉使用 figure。
+    with _RENDER_LOCK:
+        return _render_chart(df, kind, title)
+
+
+def _render_chart(
     df: pd.DataFrame,
     kind: ChartKind = "auto",
     title: str = "",
@@ -107,10 +119,10 @@ def render_chart(
 
         if title:
             ax.set_title(title)
-        plt.tight_layout()
+        fig.tight_layout()
 
         buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight")
+        fig.savefig(buf, format="png", bbox_inches="tight")
         buf.seek(0)
         b64 = base64.b64encode(buf.read()).decode("ascii")
         return f"data:image/png;base64,{b64}", actual_kind

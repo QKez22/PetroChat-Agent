@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from operator import add
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -24,6 +25,7 @@ class AgentState(TypedDict, total=False):
     retrieved: list[dict[str, Any]]
     answer: str
     citations: list[str]
+    artifacts: Annotated[list[dict[str, Any]], add]
     sql_result: dict[str, Any]
     score: dict[str, Any]
     intent: str

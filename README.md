@@ -200,9 +200,11 @@ SSE 事件：
 
 | 事件 | 含义 |
 | --- | --- |
-| `token` | LLM 输出文本 chunk |
+| `progress` | 当前执行的专业节点 |
+| `token` | worker 完成后追加的答案片段（含程序生成的 SQL 表格） |
 | `tool_call` | LLM 决定调用工具 |
 | `tool_result` | 工具执行结果预览 |
+| `result` | 最终 `answer / citations / artifacts`，前端据此替换正文，与非流式和会话落库一致 |
 | `meta` | 引用、图表 data URI、图表类型、表格行数 |
 | `done` | 流结束 |
 | `error` | 异常信息 |
@@ -376,16 +378,20 @@ curl "http://127.0.0.1:8000/api/evaluation/runs?limit=10"
 
 原说明书规划了三维质检评分，但项目第二轮目标更偏向“可验证的数据问答能力”。因此 Phase 4 保留 Supervisor 多 Agent 目标，将子任务调整为规范问答、业务数据查询和复合工具调用，便于形成端到端的工程闭环。
 
-### 为什么图表走 SSE meta 侧信道？
+### 为什么图表通过请求结果交付？
 
-base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。后端只把 Markdown 表和图表标记写入答案，把真实图片放在 `meta.chart_data_uri`，前端可以独立渲染。
+base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。SQL 节点将报表写入本次图状态的 `artifacts`，General 的 SQL 工具通过 LangChain `ToolMessage.artifact` 返回报表，图片不会进入工具消息正文。两种接口使用相同的 `TurnResult`：`answer` 为本轮各 worker 正文的顺序拼接，`citations` 从该正文提取，`artifacts` 包含本轮报表列表。单任务直接交付，不额外调用汇总模型。
+
+SSE 在 worker 完成时追加正文，不转发 Supervisor 或 SQL 生成模型的内部文本；结束时发送权威 `result`。这是按 worker 输出的增量流，不是逐 token 的打字流。前端支持显示多张图表；`meta.chart_data_uri` 等旧单图字段仍兼容保留，取本次请求最后一张图。报表模块不再维护 `_LAST_REPORT` 全局变量，并对 matplotlib 绘图部分加锁，避免并发交叉使用 figure。
+
+会话历史仍保存文本答案；本次变更未增加历史图表持久化。
 
 ## 测试状态
 
-当前测试覆盖 RAG 基础逻辑、工具、MCP 配置、SQL validator、SQL executor 探活、报表、Supervisor 和 API 结构。
+当前测试覆盖 RAG 基础逻辑、工具、MCP 配置、SQL validator、SQL executor 探活、报表、Supervisor、API 结构，以及复合任务最终答案、流式/非流式一致性、SQL/General 两种路径的并发报表隔离。
 
 ```text
-101 passed, 3 warnings
+uv run --frozen pytest -q
 ```
 
 外部依赖类测试在 Chroma、Embedding Key 或 MySQL 不可达时会自动 skip，保证离线环境也能验证核心逻辑。
@@ -393,7 +399,6 @@ base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。后端�
 ## 后续可选增强
 
 - 端到端评估集：继续扩大 `scripts/replay_golden_set.py --mode agent --limit N` 的真实回放规模，基于已接入的 SQL 合约准确率、RAG MRR、证据覆盖率、忠实性代理指标和 Memory Hit Rate 做质量回归。
-- 并发报表侧信道：把模块级 `_LAST_REPORT` 改为 `contextvars`，避免多用户并发串数据。
 - 前端体验增强：补充历史记录搜索、错误重试、会话重命名和更细的路由可视化。
 - Docker 一键演示：补齐 MySQL 示例容器、Chroma 和 API 的 compose 编排。
 - LangSmith 截图：在 README 中补充 supervisor 路由、QA/SQL/General 三路 trace。

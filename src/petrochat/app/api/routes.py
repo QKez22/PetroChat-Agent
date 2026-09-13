@@ -1,25 +1,19 @@
-"""FastAPI 路由：问答接口（同步 + SSE 流式）。
-
-Phase 2 更新：
-  - graph 改为 ReAct，主状态在 state["messages"]
-  - 答案 = 最后一条 AIMessage 的 content
-  - citations 从答案文本中正则抽取 [N.N.N] 模式
-"""
+"""FastAPI 问答接口: 共用最终结果, SSE 只发送 worker 正文与工具进度。"""
 
 from __future__ import annotations
 
 import json
-import re
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent import build_graph, build_initial_state
+from ..agent.result import CITATION_PATTERN, answer_parts, build_turn_result
 from ..core import get_settings
 from ..core.models import (
     ChatMessageRecord,
@@ -40,22 +34,12 @@ from .auth import CurrentUserDep
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
-# 用于从答案文本里抽取 [N.N.N] 形式的章节号引用
-_CITATION_PAT = re.compile(r"\[(\d+(?:\.\d+){1,3})\]")
+_CITATION_PAT = CITATION_PATTERN
 
 
 def _extract_answer_and_citations(state: dict) -> tuple[str, list[str]]:
-    """从 ReAct 图的最终 state 中抽取答案与引用编号。"""
-    msgs = state.get("messages") or []
-    answer = ""
-    # 最后一条不含 tool_calls 的 AIMessage 即最终答案
-    for m in reversed(msgs):
-        if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
-            answer = m.content if isinstance(m.content, str) else str(m.content)
-            break
-
-    citations = list(dict.fromkeys(_CITATION_PAT.findall(answer)))  # 保序去重
-    return answer, citations
+    result = build_turn_result(state)
+    return result.answer, result.citations
 
 
 def _to_history_payload(messages: list[StoredMessage]) -> list[dict[str, str]]:
@@ -163,11 +147,14 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
                 long_term_context=prompt_context.long_term_context,
             )
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("graph.ainvoke 失败")
         raise HTTPException(status_code=500, detail=_friendly_error_message(e)) from e
 
-    answer, citations = _extract_answer_and_citations(result)
+    turn_result = build_turn_result(result)
+    answer, citations = turn_result.answer, turn_result.citations
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     route = _guess_route(result, answer)
     store.append_turn(
@@ -182,6 +169,7 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
     return ChatResponse(
         answer=answer,
         citations=citations,
+        artifacts=turn_result.artifacts,
         score=None,
         session_id=session_id,
         memory_used=[m.id for m in memories],
@@ -216,15 +204,16 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
     """把 LangGraph 事件流翻译成 SSE 事件流。
 
     SSE 事件类型：
-      token       LLM 每个文本 chunk（最频繁）
+      token       已完成 worker 的答案片段
       tool_call   LLM 决定调工具时（含工具名 + 参数，让前端可显示"思考中..."）
       tool_result 工具返回时（含工具名 + 截断的结果）
+      result      与非流式一致的最终答案、引用及报表
       meta        全流程结束时（含 citations）
       done        流结束
       error       任一环节抛错
     """
-    final_answer = ""
-    route = "general"
+    final_state = None
+    emitted_parts = []
     started_at = time.perf_counter()
 
     try:
@@ -258,45 +247,38 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
 
         async for event in graph.astream_events(state, version="v2"):
             kind = event.get("event")
+            name = event.get("name")
+            parents = event.get("parent_ids", [])
+            output = event.get("data", {}).get("output")
 
-            # ---- LLM token 流（最频繁）----
-            if kind == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                if isinstance(chunk, AIMessageChunk) and chunk.content:
-                    text = chunk.content if isinstance(chunk.content, str) else str(chunk.content)
-                    final_answer += text
-                    yield _sse("token", {"text": text})
-
-            # ---- LLM 决定调工具 ----
-            elif kind == "on_chat_model_end":
-                output = event.get("data", {}).get("output")
-                if isinstance(output, AIMessage) and getattr(output, "tool_calls", None):
+            # 只在顶层 worker 完成后交付正文, 不泄露 SQL 生成和路由模型文本。
+            if kind == "on_chain_end":
+                if not parents:
+                    final_state = output
+                elif len(parents) == 1 and name in {"qa", "sql", "general"} and isinstance(output, dict):
+                    for part in answer_parts(output.get("messages") or []):
+                        prefix = "\n\n" if emitted_parts else ""
+                        emitted_parts.append(part)
+                        yield _sse("token", {"text": prefix + part})
+            elif kind == "on_chain_start" and len(parents) == 1 and name in {"qa", "sql", "general"}:
+                yield _sse("progress", {"node": name})
+            elif kind == "on_chat_model_end" and isinstance(output, AIMessage):
+                # Supervisor/SQL 的结构化输出属于内部控制, 不是用户工具调用。
+                if event.get("metadata", {}).get("langgraph_node") == "general":
                     for tc in output.tool_calls:
-                        if tc.get("name") == "RouteDecision":
-                            args = tc.get("args") or {}
-                            if args.get("next") in {"qa", "sql", "general"}:
-                                route = args["next"]
-                        yield _sse("tool_call", {
-                            "name": tc.get("name"),
-                            "args": tc.get("args"),
-                        })
-
-            # ---- 工具执行完成 ----
+                        yield _sse("tool_call", {"name": tc.get("name"), "args": tc.get("args")})
             elif kind == "on_tool_end":
-                tool_name = event.get("name")
-                output = event.get("data", {}).get("output")
-                result_text = ""
-                if isinstance(output, ToolMessage):
-                    result_text = output.content if isinstance(output.content, str) else str(output.content)
-                elif isinstance(output, str):
-                    result_text = output
-                yield _sse("tool_result", {
-                    "name": tool_name,
-                    "preview": result_text[:200],
-                })
+                content = output.content if isinstance(output, ToolMessage) else output
+                preview = content if isinstance(content, str) else ""
+                yield _sse("tool_result", {"name": name, "preview": preview[:200]})
 
-        # 整图结束后从累积答案抽 citations + 拿走最近一次报表（含 chart 的 data URI）
-        citations = list(dict.fromkeys(_CITATION_PAT.findall(final_answer)))
+        if not isinstance(final_state, dict):
+            raise RuntimeError("未收到完整执行结果, 请重试")
+        turn_result = build_turn_result(final_state)
+        final_answer, citations = turn_result.answer, turn_result.citations
+        route = _guess_route(final_state, final_answer)
+        # 最终结果是权威值: 前端替换正文, 与非流式响应及落库保持一致。
+        yield _sse("result", turn_result.model_dump())
         latency_ms = int((time.perf_counter() - started_at) * 1000)
         if final_answer.strip():
             store.append_turn(
@@ -323,15 +305,11 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
             "memory_written_ids": [m.id for m in written],
         }
 
-        try:
-            from ..report import pop_last_report
-            rep = pop_last_report()
-            if rep and rep.chart_data_uri:
-                meta["chart_data_uri"] = rep.chart_data_uri
-                meta["chart_kind"] = rep.chart_kind
-                meta["table_row_count"] = rep.row_count
-        except Exception as e:
-            logger.warning("拉取 last_report 失败: {}", e)
+        meta["artifacts"] = [artifact.model_dump() for artifact in turn_result.artifacts]
+        # 兼容旧客户端的单图字段, 完整报表列表通过 artifacts 提供。
+        chart = next((a for a in reversed(turn_result.artifacts) if a.chart_data_uri), None)
+        if chart:
+            meta.update(chart_data_uri=chart.chart_data_uri, chart_kind=chart.chart_kind, table_row_count=chart.row_count)
 
         yield _sse("meta", meta)
         yield _sse("done", {})

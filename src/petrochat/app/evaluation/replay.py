@@ -15,9 +15,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage
 
 from petrochat.app.agent import build_graph, build_initial_state
+from petrochat.app.agent.result import build_turn_result
 
 from ._io import loads_json, read_csv, write_json, write_jsonl
 
@@ -32,11 +32,7 @@ def _index_by_key(rows: list[dict[str, str]]) -> dict[tuple[str, str], dict[str,
 
 
 def _latest_answer(state: dict[str, Any]) -> str:
-    messages = state.get("messages") or []
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
-            return msg.content if isinstance(msg.content, str) else str(msg.content)
-    return ""
+    return build_turn_result(state).answer
 
 
 def _guess_route(state: dict[str, Any]) -> str:

@@ -76,11 +76,28 @@ class ChatRequest(BaseModel):
     user_id: str = Field(default="default", min_length=1, max_length=64)
 
 
-class ChatResponse(BaseModel):
-    """非流式接口的响应（流式接口用 SSE，不走这个）。"""
+class ReportArtifact(BaseModel):
+    """随本次请求交付的报表, 不进入模型消息正文。"""
+
+    title: str = ""
+    markdown: str
+    chart_data_uri: str | None = None
+    chart_kind: str = "none"
+    row_count: int
+    columns: list[str]
+
+
+class TurnResult(BaseModel):
+    """流式与非流式接口共享的最终结果。"""
 
     answer: str
     citations: list[str] = Field(default_factory=list)
+    artifacts: list[ReportArtifact] = Field(default_factory=list)
+
+
+class ChatResponse(TurnResult):
+    """非流式接口的响应（流式接口用 SSE，不走这个）。"""
+
     score: ScoreResult | None = None
     session_id: str | None = None
     memory_used: list[str] = Field(default_factory=list)
