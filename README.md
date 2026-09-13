@@ -213,8 +213,27 @@ SSE 事件：
 
 ```powershell
 cd D:\Project\pythonProject\PetroChat-Agent
-uv sync
+uv sync --frozen
 ```
+
+当前锁定 LangChain 1.4.0、langchain-core 1.6.3、langchain-openai 1.6.2、
+langchain-text-splitters 1.1.2 和 LangGraph 1.2.11，继续采用循环 Supervisor StateGraph。
+升级时移除了未使用的 `langchain-community`，无需引入 `langchain-classic`。
+MCP 适配器保留已验证的 0.1.14；DeepSeek 结构化输出仍显式使用
+`method="function_calling"`，百炼仍使用 1024 维字符串输入。
+PyCharm 请选择项目 `.venv/Scripts/python.exe`，同步依赖后重启运行中的 API。
+
+依赖与回归检查：
+
+```powershell
+uv pip check
+uv run --frozen pytest -q
+```
+
+`tests/test_llm_compatibility.py` 使用本地模拟 HTTP 服务检查真实 SDK 的结构化输出、
+流式工具调用和 Embedding 批处理，不需要模型密钥。检索器集成测试在 Chroma
+不可达或未配置百炼密钥时会跳过。Windows 终端运行含图标的 CLI 时，
+如遇 GBK 编码错误，可先设置 `$env:PYTHONIOENCODING="utf-8"`。
 
 ### 2. 配置环境变量
 

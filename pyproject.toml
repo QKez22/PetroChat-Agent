@@ -8,11 +8,10 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Cameron Patel" }]
 
 dependencies = [
-    "langgraph>=0.2.50,<2.0",
-    "langchain>=0.3.0,<1.0",
-    "langchain-core>=0.3.0,<1.0",
-    "langchain-community>=0.3.0,<1.0",
-    "langchain-openai>=0.2.0,<1.0",
+    "langgraph>=1.2.11,<2.0",
+    "langchain>=1.4.0,<2.0",
+    "langchain-core>=1.6.3,<2.0",
+    "langchain-openai>=1.6.2,<2.0",
     "chromadb-client>=0.5.20,<1.0",
     "fastapi>=0.115.0,<1.0",
     "uvicorn[standard]>=0.32.0,<1.0",
@@ -21,7 +20,7 @@ dependencies = [
     "pydantic-settings>=2.5.0,<3.0",
     "python-dotenv>=1.0.0,<2.0",
     "python-docx>=1.1.0,<2.0",
-    "langchain-text-splitters>=0.3.0,<1.0",
+    "langchain-text-splitters>=1.1.2,<2.0",
     # MCP（第三阶段）
     "mcp>=1.2.0,<2.0",
     "langchain-mcp-adapters>=0.1.0,<0.2",
