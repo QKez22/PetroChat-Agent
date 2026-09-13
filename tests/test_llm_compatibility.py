@@ -147,3 +147,18 @@ def test_embedding_keeps_text_input_dimensions_and_batching(compatible_api):
     assert all(len(vector) == 1024 for vector in result)
     assert [body["input"] for _, body in compatible_api] == [["first", "second"], ["third"]]
     assert all(body["dimensions"] == 1024 for _, body in compatible_api)
+
+
+@pytest.mark.asyncio
+async def test_model_budget_blocks_before_http_request(compatible_api):
+    from petrochat.app.core.budget import BudgetExceeded, RunBudget, budget_scope
+
+    budget = RunBudget(model_limit=2, tool_limit=2, repeat_limit=2, timeout=30)
+    with budget_scope(budget):
+        get_chat_llm().invoke("sync")
+        await get_chat_llm().ainvoke("async")
+        with pytest.raises(BudgetExceeded, match="模型调用"):
+            await get_chat_llm().ainvoke("must not reach server")
+    assert len(compatible_api) == 2
+    assert budget.model_calls == 2
+    assert get_chat_llm().max_retries == 0

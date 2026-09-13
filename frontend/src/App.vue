@@ -917,6 +917,7 @@ async function sendQuestion() {
           assistant.content = data.answer || "";
           assistant.citations = data.citations || [];
           assistant.artifacts = data.artifacts || [];
+          assistant.taskStatus = data.status || "completed";
           scrollToBottom();
         },
         tool_call(data) {
@@ -958,12 +959,13 @@ async function sendQuestion() {
       setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";
       assistant.artifacts = fallback.artifacts || [];
+      assistant.taskStatus = fallback.status || "completed";
       assistant.citations = assistant.citations.length ? assistant.citations : fallback.citations || [];
       assistant.memoryUsed = fallback.memory_used || [];
       assistant.memoryWritten = fallback.memory_written || [];
     }
 
-    assistant.status = "done";
+    assistant.status = assistant.taskStatus && assistant.taskStatus !== "completed" ? "partial" : "done";
   } catch (error) {
     assistant.status = "error";
     assistant.content = error.name === "AbortError" ? "已停止生成。" : `请求失败：${error.message}`;
@@ -1209,6 +1211,7 @@ onMounted(async () => {
                 生成中
               </span>
               <span v-if="message.status === 'error'" class="error-label">错误</span>
+              <span v-if="message.status === 'partial'" class="error-label">任务未全部完成</span>
             </div>
 
             <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.content)"></div>

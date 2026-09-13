@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
+    agent_model_call_limit: int = Field(default=12, ge=1, le=100)
+    agent_tool_call_limit: int = Field(default=8, ge=1, le=100)
+    agent_tool_repeat_limit: int = Field(default=2, ge=1, le=10)
+    agent_timeout_seconds: float = Field(default=180, gt=0, le=1800)
+    agent_tool_timeout_seconds: float = Field(default=30, gt=0, le=300)
+    agent_model_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    agent_recursion_limit: int = Field(default=64, ge=4, le=500)
 
     deepseek_api_key: SecretStr = Field(default=SecretStr(""))
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1")

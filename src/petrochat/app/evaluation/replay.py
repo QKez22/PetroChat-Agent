@@ -15,9 +15,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-
 from petrochat.app.agent import build_graph, build_initial_state
 from petrochat.app.agent.result import build_turn_result
+from petrochat.app.agent.runtime import run_graph
 
 from ._io import loads_json, read_csv, write_json, write_jsonl
 
@@ -143,7 +143,7 @@ def _oracle_predictions(
 
 async def _default_agent_runner(state: dict[str, Any]) -> dict[str, Any]:
     graph = build_graph()
-    return await graph.ainvoke(state)
+    return await run_graph(graph, state)
 
 
 async def _agent_predictions(
@@ -182,8 +182,9 @@ async def _agent_predictions(
                 )
                 state = await runner(initial_state)
                 answer = _latest_answer(state)
-                status = "ok"
-                error = ""
+                turn_result = build_turn_result(state)
+                status = "ok" if turn_result.status == "completed" else "error"
+                error = (turn_result.termination_reason or "存在未完成子任务") if status == "error" else ""
                 route = _guess_route(state)
                 retrieved = _retrieved_payload(state)
                 sql = _extract_sql(answer)

@@ -93,6 +93,10 @@ class TurnResult(BaseModel):
     answer: str
     citations: list[str] = Field(default_factory=list)
     artifacts: list[ReportArtifact] = Field(default_factory=list)
+    status: Literal["completed", "partial", "failed"] = "completed"
+    tasks: list[dict] = Field(default_factory=list)
+    usage: dict[str, int] = Field(default_factory=dict)
+    termination_reason: str = ""
 
 
 class ChatResponse(TurnResult):

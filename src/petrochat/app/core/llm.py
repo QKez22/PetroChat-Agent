@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
+from .budget import BudgetCallback
 from .config import get_settings
 
 
@@ -18,8 +19,9 @@ def get_chat_llm() -> ChatOpenAI:
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,
         temperature=0.3,
-        timeout=60,
-        max_retries=2,
+        timeout=s.agent_model_timeout_seconds,
+        max_retries=0,
+        callbacks=[BudgetCallback()],
         streaming=True,
     )
 
@@ -31,8 +33,9 @@ def get_reasoner_llm() -> ChatOpenAI:
         model=s.deepseek_reasoner_model,
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,
-        timeout=120,
-        max_retries=2,
+        timeout=s.agent_model_timeout_seconds,
+        max_retries=0,
+        callbacks=[BudgetCallback()],
     )
 
 
@@ -47,4 +50,6 @@ def get_embedding() -> OpenAIEmbeddings:
         dimensions=s.embedding_dim,
         chunk_size=s.embedding_batch_size,
         check_embedding_ctx_length=False,
+        request_timeout=s.agent_model_timeout_seconds,
+        max_retries=0,
     )

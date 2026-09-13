@@ -14,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..agent import build_graph, build_initial_state
 from ..agent.result import CITATION_PATTERN, answer_parts, build_turn_result
+from ..agent.runtime import run_graph, stream_graph_events
 from ..core import get_settings
 from ..core.models import (
     ChatMessageRecord,
@@ -136,7 +137,8 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
             conversation_summary=conversation_summary,
             long_term_context=memory_context,
         )
-        result = await graph.ainvoke(
+        result = await run_graph(
+            graph,
             build_initial_state(
                 req.question,
                 session_id=session_id,
@@ -145,7 +147,7 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
                 conversation_summary=prompt_context.conversation_summary,
                 long_term_memories=[m.to_state() for m in memories],
                 long_term_context=prompt_context.long_term_context,
-            )
+            ),
         )
     except HTTPException:
         raise
@@ -165,11 +167,18 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
         latency_ms=latency_ms,
     )
     _refresh_summary_after_turn(store, session_id)
-    written = write_memory_candidates(user_id=user_id, question=req.question, answer=answer, route=route)
+    written = (
+        write_memory_candidates(user_id=user_id, question=req.question, answer=answer, route=route)
+        if turn_result.status == "completed" else []
+    )
     return ChatResponse(
         answer=answer,
         citations=citations,
         artifacts=turn_result.artifacts,
+        status=turn_result.status,
+        tasks=turn_result.tasks,
+        usage=turn_result.usage,
+        termination_reason=turn_result.termination_reason,
         score=None,
         session_id=session_id,
         memory_used=[m.id for m in memories],
@@ -245,7 +254,7 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
             long_term_context=prompt_context.long_term_context,
         )
 
-        async for event in graph.astream_events(state, version="v2"):
+        async for event in stream_graph_events(graph, state):
             kind = event.get("event")
             name = event.get("name")
             parents = event.get("parent_ids", [])
@@ -255,7 +264,7 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
             if kind == "on_chain_end":
                 if not parents:
                     final_state = output
-                elif len(parents) == 1 and name in {"qa", "sql", "general"} and isinstance(output, dict):
+                elif len(parents) == 1 and name in {"qa", "sql", "general", "supervisor"} and isinstance(output, dict):
                     for part in answer_parts(output.get("messages") or []):
                         prefix = "\n\n" if emitted_parts else ""
                         emitted_parts.append(part)
@@ -289,7 +298,10 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
                 latency_ms=latency_ms,
             )
             _refresh_summary_after_turn(store, session_id)
-        written = write_memory_candidates(user_id=user_id, question=req.question, answer=final_answer, route=route)
+        written = (
+            write_memory_candidates(user_id=user_id, question=req.question, answer=final_answer, route=route)
+            if turn_result.status == "completed" else []
+        )
 
         meta: dict[str, Any] = {
             "citations": citations,
@@ -306,6 +318,10 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
         }
 
         meta["artifacts"] = [artifact.model_dump() for artifact in turn_result.artifacts]
+        meta.update(
+            status=turn_result.status, tasks=turn_result.tasks, usage=turn_result.usage,
+            termination_reason=turn_result.termination_reason,
+        )
         # 兼容旧客户端的单图字段, 完整报表列表通过 artifacts 提供。
         chart = next((a for a in reversed(turn_result.artifacts) if a.chart_data_uri), None)
         if chart:

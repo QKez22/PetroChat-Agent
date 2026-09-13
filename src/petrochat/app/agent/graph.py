@@ -17,12 +17,15 @@ from .nodes.qa_node import qa_node
 from .nodes.sql_node import sql_node
 from .nodes.supervisor_node import supervisor_node
 from .prompts import AGENT_SYSTEM_PROMPT
+from .runtime import guarded_async_tool, guarded_tool, tool_error
+from .tasks import wrap_worker
 
 
 def _resolve_tools():
     s = get_settings()
     if s.mcp_enabled:
         from ..mcp import get_loaded_tools
+
         try:
             tools = get_loaded_tools()
             logger.info("graph 使用 MCP 工具: {} 个", len(tools))
@@ -60,10 +63,18 @@ def build_graph():
 
     builder = StateGraph(AgentState)
     builder.add_node("supervisor", supervisor_node)
-    builder.add_node("qa", qa_node)
-    builder.add_node("sql", sql_node)
-    builder.add_node("general", general_node)
-    builder.add_node("tools", ToolNode(tools))
+    builder.add_node("qa", wrap_worker("qa", qa_node))
+    builder.add_node("sql", wrap_worker("sql", sql_node))
+    builder.add_node("general", wrap_worker("general", general_node))
+    builder.add_node(
+        "tools",
+        ToolNode(
+            tools,
+            wrap_tool_call=guarded_tool,
+            awrap_tool_call=guarded_async_tool,
+            handle_tool_errors=tool_error,
+        ),
+    )
 
     builder.add_edge(START, "supervisor")
     builder.add_conditional_edges(

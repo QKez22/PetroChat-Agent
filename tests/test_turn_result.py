@@ -241,6 +241,67 @@ def test_empty_current_turn_never_returns_previous_answer():
     assert result.answer == ""
 
 
+def test_partial_result_is_consistent_and_not_written_to_long_term_memory(runtime, monkeypatch):
+    from petrochat.app.agent.nodes.supervisor_node import RouteDecision, supervisor_node
+    from petrochat.app.core import get_settings
+    from petrochat.app.core.budget import current_budget
+
+    graph_module = importlib.import_module("petrochat.app.agent.graph")
+    supervisor_module = importlib.import_module("petrochat.app.agent.nodes.supervisor_node")
+
+    class Planner:
+        def with_structured_output(self, *args, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            current_budget().reserve("model")
+            return RouteDecision(
+                next="qa",
+                reasoning="两项任务",
+                tasks=[
+                    {"worker": "qa", "instruction": "解释规则"},
+                    {"worker": "sql", "instruction": "统计事务"},
+                ],
+            )
+
+    def blocked_query(question):
+        current_budget().reserve("model")
+        raise AssertionError("预算耗尽后不应查询")
+
+    monkeypatch.setenv("AGENT_MODEL_CALL_LIMIT", "1")
+    get_settings.cache_clear()
+    monkeypatch.setattr(supervisor_module, "get_chat_llm", Planner)
+    monkeypatch.setattr(graph_module, "supervisor_node", supervisor_node)
+    monkeypatch.setattr(
+        graph_module,
+        "qa_node",
+        lambda state: {
+            "messages": [AIMessage(content="规范依据 [1.2]。")],
+            "retrieved": [{"content": "依据"}],
+        },
+    )
+    monkeypatch.setattr(runtime.sql_module, "nl2sql", blocked_query)
+    graph_module.build_graph.cache_clear()
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {_encode_local_token(runtime.user)}"}
+    request = {"question": "解释规则并统计事务"}
+    response = client.post("/api/chat", json=request, headers=headers)
+    assert response.status_code == 200
+    normal = response.json()
+    events = decode_sse(client.post("/api/chat/stream", json=request, headers=headers).text)
+    assert events[-1][0] == "done", events
+    final = next(data for kind, data in events if kind == "result")
+    meta = next(data for kind, data in events if kind == "meta")
+    for key in ("answer", "status", "tasks", "usage", "termination_reason"):
+        assert normal[key] == final[key]
+    assert normal["status"] == meta["status"] == "partial"
+    assert normal["usage"] == {"model_calls": 1, "tool_calls": 0}
+    assert [t["status"] for t in normal["tasks"]] == ["completed", "blocked"]
+    assert "规范依据" in normal["answer"] and "上限" in normal["termination_reason"]
+    assert not runtime.written
+    assert len(runtime.store.turns) == 2
+
+
 def test_graph_error_emits_error_without_success_result(runtime, monkeypatch):
     def fail(question):
         raise RuntimeError("synthetic failure")

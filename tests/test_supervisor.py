@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
 from petrochat.app.agent.nodes.supervisor_node import RouteDecision, supervisor_node
 
@@ -48,7 +49,9 @@ def test_supervisor_can_finish() -> None:
         "petrochat.app.agent.nodes.supervisor_node.get_chat_llm",
         return_value=_FakeChat(),
     ):
-        out = supervisor_node({"question": "测试"})
+        out = supervisor_node(
+            {"question": "测试", "messages": [HumanMessage("测试"), AIMessage("已回答")]}
+        )
 
     assert out["next"] == "FINISH"
     assert out["supervisor_step"] == 1
@@ -75,6 +78,25 @@ def test_supervisor_increments_step() -> None:
     assert out["supervisor_step"] == 3
 
 
+def test_supervisor_cannot_finish_before_answering() -> None:
+    class Planner:
+        def with_structured_output(self, *args, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            return RouteDecision(next="FINISH", reasoning="过早结束")
+
+    with patch("petrochat.app.agent.nodes.supervisor_node.get_chat_llm", return_value=Planner()):
+        out = supervisor_node(
+            {
+                "question": "新问题",
+                "messages": [HumanMessage("旧问题"), AIMessage("旧回答"), HumanMessage("新问题")],
+            }
+        )
+    assert out["next"] == "general"
+    assert out["tasks"][0]["instruction"] == "新问题"
+
+
 def test_supervisor_max_steps_force_finish() -> None:
     """达到 SUPERVISOR_MAX_STEPS 时强制 FINISH，不调 LLM。"""
     from petrochat.app.agent.nodes.supervisor_node import SUPERVISOR_MAX_STEPS
@@ -95,10 +117,12 @@ def test_supervisor_max_steps_force_finish() -> None:
         "petrochat.app.agent.nodes.supervisor_node.get_chat_llm",
         return_value=_FakeChat(),
     ):
-        out = supervisor_node({
-            "question": "测试",
-            "supervisor_step": SUPERVISOR_MAX_STEPS,
-        })
+        out = supervisor_node(
+            {
+                "question": "测试",
+                "supervisor_step": SUPERVISOR_MAX_STEPS,
+            }
+        )
 
     assert out["next"] == "FINISH"
     assert not llm_called
@@ -127,15 +151,17 @@ def test_supervisor_passes_worker_outputs_to_llm() -> None:
         "petrochat.app.agent.nodes.supervisor_node.get_chat_llm",
         return_value=_FakeChat(),
     ):
-        supervisor_node({
-            "question": "查仪表事务并统计数量",
-            "messages": [
-                SystemMessage(content="业务系统 prompt"),
-                HumanMessage(content="查仪表事务并统计数量"),
-                worker_output,
-            ],
-            "supervisor_step": 1,
-        })
+        supervisor_node(
+            {
+                "question": "查仪表事务并统计数量",
+                "messages": [
+                    SystemMessage(content="业务系统 prompt"),
+                    HumanMessage(content="查仪表事务并统计数量"),
+                    worker_output,
+                ],
+                "supervisor_step": 1,
+            }
+        )
 
     msgs = captured["msgs"]
     # 第 0 条应被替换为 supervisor 自己的 system prompt
@@ -154,5 +180,6 @@ def test_supervisor_empty_question_falls_back() -> None:
 def test_route_decision_validates_choices() -> None:
     """next 只能是 qa/sql/general/FINISH 四选一。"""
     import pydantic
+
     with pytest.raises(pydantic.ValidationError):
         RouteDecision(next="invalid_route", reasoning="x")

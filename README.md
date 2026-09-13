@@ -11,7 +11,7 @@
 
 - **垂直领域护城河**：基于 4 份石化规范文档构建 1500+ chunks 知识库，并接入事务/任务业务库，避免通用聊天项目的同质化。
 - **阶段化工程演进**：从单节点 RAG 起步，逐步扩展到 Tool Calling、MCP Server、Supervisor 多 Agent，再到记忆管理与 Vue3 登录/RBAC 工作台。
-- **循环多 Agent 路由**：`supervisor` 根据意图分派 `qa`、`sql`、`general` 三个子 agent，worker 执行完回 supervisor 评估是否继续分派（支持多意图任务），FINISH 结束循环。
+- **循环多 Agent 路由**：`supervisor` 首轮拆分子任务及依赖，分派 `qa`、`sql`、`general`；worker 返回后根据完成记录继续调度，FINISH 结束循环，避免反复调用规划模型。
 - **安全 NL2SQL**：使用 DeepSeek function calling 生成 SQL，`sqlglot` AST 校验只允许单条 SELECT，自动注入 LIMIT，并用 MySQL `MAX_EXECUTION_TIME` 控制慢查询。
 - **可演示报表输出**：SQL 查询结果自动转 Markdown 表，适合的数据生成 base64 PNG 图表，通过 SSE `meta` 事件传给前端。
 - **工程可观测与可测试**：LangSmith 链路追踪、FastAPI SSE 流式输出、Golden Set 回放/评估脚本和 90+ 个 pytest 测试覆盖核心逻辑。
@@ -386,9 +386,31 @@ SSE 在 worker 完成时追加正文，不转发 Supervisor 或 SQL 生成模型
 
 会话历史仍保存文本答案；本次变更未增加历史图表持久化。
 
+### P1：明确子任务与执行预算
+
+首轮 Supervisor 通过 `function_calling` 输出最多 5 个子任务，每项包含 worker、独立输入和前序依赖序号。程序校验重复任务和非法依赖；worker 完成后仍回到 Supervisor，但后续调度依据 `pending → running → completed/failed/blocked` 记录完成，不再询问模型是否结束。简单问题只有一个任务，不额外调用总结模型。
+
+例如“解释 ITPM，并统计各专业事务数量”拆为 QA 和 SQL 两项独立任务。SQL 只收到统计子问题；只有显式依赖 QA 的任务才收到其文本结果。依赖失败会阻断下游，独立任务可以继续。General 只看到系统上下文、本任务输入及自身工具循环，避免重复处理其他 worker 的工作。依赖摘要最多 4000 字符，截断时附提示；完整正文和报表仍通过本轮结果交付。
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `AGENT_MODEL_CALL_LIMIT` | 12 | 图内聊天模型调用次数，含规划、SQL 生成/修复与 General 工具循环 |
+| `AGENT_TOOL_CALL_LIMIT` | 8 | ToolNode 调用次数，含失败尝试 |
+| `AGENT_TOOL_REPEAT_LIMIT` | 2 | 同名工具、相同参数的重复次数 |
+| `AGENT_TIMEOUT_SECONDS` | 180 | Agent 图执行时间上限（秒） |
+| `AGENT_TOOL_TIMEOUT_SECONDS` | 30 | 单次工具等待上限（秒） |
+| `AGENT_MODEL_TIMEOUT_SECONDS` | 60 | 模型/Embedding SDK 网络超时（秒） |
+| `AGENT_RECURSION_LIMIT` | 64 | 图步数上限，包含 General 工具循环 |
+
+API、CLI 和真实评估回放统一经过 `run_graph` / `stream_graph_events`。预算按请求隔离，在发起调用前计数；SDK 自动重试关闭，SQL 显式修复继续受同一预算约束。超时或预算耗尽后保留已完成结果，并返回 `status`、`tasks`、`usage`、`termination_reason`。`status` 为 `completed`、`partial` 或 `failed`，前端显示未完成提示；部分结果不抽取长期记忆，评估回放也不计为成功。
+
+预算边界是 Agent 图：前后会话读写、记忆召回/摘要不计入图耗时和调用数；Embedding 不计入聊天模型次数。MCP 计客户端工具调用，远端服务内部调用需要服务端另行控制。超时停止等待并阻止后续聊天模型调用和工具调度，已启动的同步 worker 线程/远端请求无法强制撤销，仍受各自网络和 SQL 超时约束。这里的调用预算不是 token 或金额限额。
+
 ## 测试状态
 
 当前测试覆盖 RAG 基础逻辑、工具、MCP 配置、SQL validator、SQL executor 探活、报表、Supervisor、API 结构，以及复合任务最终答案、流式/非流式一致性、SQL/General 两种路径的并发报表隔离。
+
+P1 回归还覆盖子任务输入隔离、依赖失败、重复计划校验、模型/工具/重复调用/超时/图步数预算、并发请求隔离、部分结果接口一致性，以及真实 SDK 在发送 HTTP 请求前拦截超额调用。
 
 ```text
 uv run --frozen pytest -q

@@ -45,8 +45,15 @@ def build_turn_result(state: dict[str, Any]) -> TurnResult:
     for message in messages[start:]:
         if isinstance(message, ToolMessage) and isinstance(message.artifact, dict):
             artifacts.extend(message.artifact.get("reports") or [])
+    tasks = state.get("tasks") or []
+    incomplete = bool(state.get("termination_reason")) or any(t["status"] != "completed" for t in tasks)
+    completed = any(t["status"] == "completed" for t in tasks)
     return TurnResult(
         answer=answer,
         citations=list(dict.fromkeys(CITATION_PATTERN.findall(answer))),
         artifacts=artifacts,
+        status=("partial" if completed else "failed") if incomplete else "completed",
+        tasks=[{k: v for k, v in task.items() if k != "message_start"} for task in tasks],
+        usage=state.get("usage") or {},
+        termination_reason=state.get("termination_reason", ""),
     )
