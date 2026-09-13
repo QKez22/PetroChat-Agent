@@ -41,9 +41,9 @@ def _cached_examples() -> tuple[list[dict], list[str]]:
     return examples, knowledge
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(schema_md: str | None = None, extra_rules: str = "") -> str:
     s = get_settings()
-    schema_md = _cached_schema_md()
+    schema_context = schema_md or _cached_schema_md()
     examples, knowledge = _cached_examples()
 
     examples_md = "\n\n".join(
@@ -55,7 +55,7 @@ def _build_system_prompt() -> str:
     return f"""你是 MySQL 8 专家，把用户的中文问题转成 SELECT 语句。
 
 【可用表 schema】
-{schema_md}
+{schema_context}
 
 【业务知识铁则（必读，违反会出错）】
 {knowledge_md}
@@ -69,30 +69,72 @@ def _build_system_prompt() -> str:
 3. MySQL 8 方言，可以用 CTE / 窗口函数。
 4. 默认会自动注入 LIMIT {s.sql_default_limit}，你不必显式写 LIMIT；除非用户问 Top-N。
 5. 字段使用反引号或不加都行；最终 SQL 要可直接执行。
+6. 如果用户消息包含【最近用户约束】或【SQL过滤提示】，这些是上游解析出的业务条件，必须优先继承并写入 WHERE/GROUP BY。
+{extra_rules}
 """
 
 
-def generate_sql(question: str) -> SqlPlan:
+def _invoke_sql_plan(question: str, system_prompt: str, log_label: str) -> SqlPlan:
+    llm = get_chat_llm().with_structured_output(SqlPlan, method="function_calling")
+    logger.info("{} 入参: {}", log_label, question[:80])
+    plan: SqlPlan = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=question),
+    ])
+    logger.info("{} 输出 SQL: {}", log_label, plan.sql[:120].replace("\n", " "))
+    return plan
+
+
+def generate_sql(question: str, schema_md: str | None = None) -> SqlPlan:
     """把自然语言问题转成 SqlPlan。
 
     method='function_calling'：DeepSeek 兼容层不支持 json_schema response_format，
     必须用 function_calling 模式（兼容 phase 2 的 bind_tools 机制）。
     """
-    llm = get_chat_llm().with_structured_output(SqlPlan, method="function_calling")
-    sys_prompt = _build_system_prompt()
-    logger.info("generate_sql 入参: {}", question[:80])
-    plan: SqlPlan = llm.invoke([
-        SystemMessage(content=sys_prompt),
-        HumanMessage(content=question),
-    ])
-    logger.info("generate_sql 输出 SQL: {}", plan.sql[:120].replace("\n", " "))
-    return plan
+    return _invoke_sql_plan(
+        question=question,
+        system_prompt=_build_system_prompt(schema_md=schema_md),
+        log_label="generate_sql",
+    )
+
+
+def repair_sql(
+    question: str,
+    invalid_sql: str,
+    validation_error: str,
+    schema_md: str | None = None,
+) -> SqlPlan:
+    """Repair one generated SQL statement using validator feedback."""
+
+    extra_rules = """
+6. 你正在修复一条未通过校验的 SQL。必须优先消除校验错误，不要改变用户问题语义。
+7. 不要解释错误，只返回修复后的单条 SELECT SQL 和简短 reasoning。
+"""
+    repair_question = f"""用户问题：
+{question}
+
+未通过校验的 SQL：
+```sql
+{invalid_sql}
+```
+
+校验错误：
+{validation_error}
+"""
+    return _invoke_sql_plan(
+        question=repair_question,
+        system_prompt=_build_system_prompt(schema_md=schema_md, extra_rules=extra_rules),
+        log_label="repair_sql",
+    )
 
 
 def clear_caches() -> None:
     """测试 / dev 期使用：清空 schema 与样例缓存。"""
     _cached_schema_md.cache_clear()
     _cached_examples.cache_clear()
+    from .schema_narrowing import clear_schema_narrowing_cache
+
+    clear_schema_narrowing_cache()
 
 
 def preview_schema_md() -> str:

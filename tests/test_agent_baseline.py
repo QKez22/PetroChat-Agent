@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -13,14 +12,7 @@ from petrochat.app.evaluation.baseline import (
 )
 
 
-def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
-    with path.open("w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _make_baseline_golden(tmp_path: Path) -> Path:
+def _make_baseline_golden(tmp_path: Path, write_csv) -> Path:
     golden = tmp_path / "golden"
     golden.mkdir()
     turns = [
@@ -69,8 +61,8 @@ def _make_baseline_golden(tmp_path: Path) -> Path:
             "forbidden_behavior": "[]",
         },
     ]
-    _write_csv(golden / "golden_dialogue_turns.csv", turns)
-    _write_csv(golden / "golden_memory_state.csv", [
+    write_csv(golden / "golden_dialogue_turns.csv", turns)
+    write_csv(golden / "golden_memory_state.csv", [
         {
             "dialogue_id": row["dialogue_id"],
             "turn_id": row["turn_id"],
@@ -83,7 +75,7 @@ def _make_baseline_golden(tmp_path: Path) -> Path:
         }
         for row in turns
     ])
-    _write_csv(golden / "golden_sql_expectation.csv", [
+    write_csv(golden / "golden_sql_expectation.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -98,7 +90,7 @@ def _make_baseline_golden(tmp_path: Path) -> Path:
             "forbidden_sql_operations": "[]",
         }
     ])
-    _write_csv(golden / "golden_rag_evidence.csv", [
+    write_csv(golden / "golden_rag_evidence.csv", [
         {
             "dialogue_id": "d2",
             "turn_id": "1",
@@ -110,7 +102,7 @@ def _make_baseline_golden(tmp_path: Path) -> Path:
             "forbidden_points": "[]",
         }
     ])
-    _write_csv(golden / "golden_scoring_rubric.csv", [
+    write_csv(golden / "golden_scoring_rubric.csv", [
         {
             "dialogue_id": row["dialogue_id"],
             "turn_id": row["turn_id"],
@@ -132,8 +124,8 @@ def test_parse_scenario_targets() -> None:
     assert parse_scenario_targets(["rag_context_memory=2"]) == {"rag_context_memory": 2}
 
 
-def test_baseline_plan_is_sanitized(tmp_path: Path) -> None:
-    golden = _make_baseline_golden(tmp_path)
+def test_baseline_plan_is_sanitized(tmp_path: Path, write_csv) -> None:
+    golden = _make_baseline_golden(tmp_path, write_csv)
 
     plan = build_baseline_plan(
         golden,
@@ -148,8 +140,8 @@ def test_baseline_plan_is_sanitized(tmp_path: Path) -> None:
     assert "private" not in json.dumps(plan, ensure_ascii=False)
 
 
-def test_run_agent_baseline_plan_only_writes_report(tmp_path: Path) -> None:
-    golden = _make_baseline_golden(tmp_path)
+def test_run_agent_baseline_plan_only_writes_report(tmp_path: Path, write_csv) -> None:
+    golden = _make_baseline_golden(tmp_path, write_csv)
     out_dir = tmp_path / "out"
 
     result = run_agent_baseline(
@@ -166,8 +158,8 @@ def test_run_agent_baseline_plan_only_writes_report(tmp_path: Path) -> None:
     assert not (out_dir / "agent_baseline_predictions.jsonl").exists()
 
 
-def test_run_agent_baseline_executes_with_fake_runner(tmp_path: Path) -> None:
-    golden = _make_baseline_golden(tmp_path)
+def test_run_agent_baseline_executes_with_fake_runner(tmp_path: Path, write_csv) -> None:
+    golden = _make_baseline_golden(tmp_path, write_csv)
     out_dir = tmp_path / "out"
 
     async def fake_runner(state: dict) -> dict:

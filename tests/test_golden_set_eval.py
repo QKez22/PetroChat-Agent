@@ -1,25 +1,17 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
 from petrochat.app.evaluation import evaluate_golden_set
 
 
-def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
+def test_evaluate_golden_set_profiles_contracts(tmp_path: Path, write_csv) -> None:
     golden = tmp_path / "golden"
     out_dir = tmp_path / "out"
     golden.mkdir()
 
-    _write_csv(golden / "golden_dialogue_turns.csv", [
+    write_csv(golden / "golden_dialogue_turns.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -32,7 +24,7 @@ def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
             "forbidden_behavior": "[]",
         }
     ])
-    _write_csv(golden / "golden_memory_state.csv", [
+    write_csv(golden / "golden_memory_state.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -44,7 +36,7 @@ def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
             "requires_clarification": "False",
         }
     ])
-    _write_csv(golden / "golden_sql_expectation.csv", [
+    write_csv(golden / "golden_sql_expectation.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -59,7 +51,7 @@ def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
             "forbidden_sql_operations": "[]",
         }
     ])
-    _write_csv(golden / "golden_rag_evidence.csv", [
+    write_csv(golden / "golden_rag_evidence.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -71,7 +63,7 @@ def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
             "forbidden_points": "[]",
         }
     ])
-    _write_csv(golden / "golden_scoring_rubric.csv", [
+    write_csv(golden / "golden_scoring_rubric.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -101,11 +93,11 @@ def test_evaluate_golden_set_profiles_contracts(tmp_path: Path) -> None:
     assert (out_dir / "golden_eval_summary.md").exists()
 
 
-def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
+def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path, write_csv) -> None:
     golden = tmp_path / "golden"
     golden.mkdir()
 
-    _write_csv(golden / "golden_dialogue_turns.csv", [
+    write_csv(golden / "golden_dialogue_turns.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -118,7 +110,7 @@ def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
             "forbidden_behavior": "[]",
         }
     ])
-    _write_csv(golden / "golden_memory_state.csv", [
+    write_csv(golden / "golden_memory_state.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -130,7 +122,7 @@ def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
             "requires_clarification": "False",
         }
     ])
-    _write_csv(golden / "golden_sql_expectation.csv", [
+    write_csv(golden / "golden_sql_expectation.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -148,7 +140,7 @@ def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
             "forbidden_sql_operations": "[]",
         }
     ])
-    _write_csv(golden / "golden_rag_evidence.csv", [
+    write_csv(golden / "golden_rag_evidence.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -160,7 +152,7 @@ def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
             "forbidden_points": "[\"legacy\"]",
         }
     ])
-    _write_csv(golden / "golden_scoring_rubric.csv", [
+    write_csv(golden / "golden_scoring_rubric.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -211,11 +203,11 @@ def test_evaluate_golden_set_prediction_quality_metrics(tmp_path: Path) -> None:
     assert result["quality_gate"]["failedCount"] == 0
 
 
-def test_quality_gate_marks_prediction_regression(tmp_path: Path) -> None:
+def test_quality_gate_marks_prediction_regression(tmp_path: Path, write_csv) -> None:
     golden = tmp_path / "golden"
     golden.mkdir()
 
-    _write_csv(golden / "golden_dialogue_turns.csv", [
+    write_csv(golden / "golden_dialogue_turns.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -228,7 +220,7 @@ def test_quality_gate_marks_prediction_regression(tmp_path: Path) -> None:
             "forbidden_behavior": "[]",
         }
     ])
-    _write_csv(golden / "golden_memory_state.csv", [
+    write_csv(golden / "golden_memory_state.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -240,7 +232,7 @@ def test_quality_gate_marks_prediction_regression(tmp_path: Path) -> None:
             "requires_clarification": "False",
         }
     ])
-    _write_csv(golden / "golden_sql_expectation.csv", [
+    write_csv(golden / "golden_sql_expectation.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -255,7 +247,7 @@ def test_quality_gate_marks_prediction_regression(tmp_path: Path) -> None:
             "forbidden_sql_operations": "[]",
         }
     ])
-    _write_csv(golden / "golden_rag_evidence.csv", [
+    write_csv(golden / "golden_rag_evidence.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -267,7 +259,7 @@ def test_quality_gate_marks_prediction_regression(tmp_path: Path) -> None:
             "forbidden_points": "[]",
         }
     ])
-    _write_csv(golden / "golden_scoring_rubric.csv", [
+    write_csv(golden / "golden_scoring_rubric.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -306,3 +298,40 @@ def test_quality_gate_marks_prediction_regression(tmp_path: Path) -> None:
     assert statuses["success_rate"] == "fail"
     assert statuses["sql_validation_rate"] == "fail"
     assert statuses["rag_recall_at_5"] == "warn"
+
+
+def test_rag_item_matches_requires_section_when_declared() -> None:
+    """source 命中但 section 不命中时不应算作证据命中。
+
+    历史 bug：_rag_item_matches 在 source 命中后无条件 return True，
+    导致 expected_section 被默默忽略，Recall@5 / MRR 偏乐观。
+    """
+    from petrochat.app.evaluation.golden_set import _rag_item_matches
+
+    row_with_section = {
+        "expected_source_file": "policy.docx",
+        "expected_section": "2.1",
+        "expected_chunk_id": "",
+    }
+    # source 对、section 不对 → 不应命中
+    assert _rag_item_matches(row_with_section, {"source_doc": "policy.docx", "section": "3.5"}) is False
+    # source 对、section 也对 → 命中
+    assert _rag_item_matches(row_with_section, {"source_doc": "policy.docx", "section": "2.1"}) is True
+
+    row_without_section = {
+        "expected_source_file": "policy.docx",
+        "expected_section": "",
+        "expected_chunk_id": "",
+    }
+    # 没声明 section，只看 source
+    assert _rag_item_matches(row_without_section, {"source_doc": "policy.docx", "section": "3.5"}) is True
+    # source 不对 → 不命中
+    assert _rag_item_matches(row_without_section, {"source_doc": "other.docx", "section": "2.1"}) is False
+
+    row_with_chunk = {
+        "expected_source_file": "",
+        "expected_section": "9.9",
+        "expected_chunk_id": "chunk-42",
+    }
+    # chunk_id 命中直接算命中（细粒度标识，覆盖 section）
+    assert _rag_item_matches(row_with_chunk, {"chunk_id": "chunk-42"}) is True

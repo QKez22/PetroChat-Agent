@@ -11,7 +11,7 @@
 
 - **垂直领域护城河**：基于 4 份石化规范文档构建 1500+ chunks 知识库，并接入事务/任务业务库，避免通用聊天项目的同质化。
 - **阶段化工程演进**：从单节点 RAG 起步，逐步扩展到 Tool Calling、MCP Server、Supervisor 多 Agent，再到记忆管理与 Vue3 登录/RBAC 工作台。
-- **多 Agent 路由闭环**：`supervisor` 根据意图路由到 `qa`、`sql`、`general` 三个子 agent，让规范问答、数据查询、复合工具任务职责清晰。
+- **循环多 Agent 路由**：`supervisor` 首轮拆分子任务及依赖，分派 `qa`、`sql`、`general`；worker 返回后根据完成记录继续调度，FINISH 结束循环，避免反复调用规划模型。
 - **安全 NL2SQL**：使用 DeepSeek function calling 生成 SQL，`sqlglot` AST 校验只允许单条 SELECT，自动注入 LIMIT，并用 MySQL `MAX_EXECUTION_TIME` 控制慢查询。
 - **可演示报表输出**：SQL 查询结果自动转 Markdown 表，适合的数据生成 base64 PNG 图表，通过 SSE `meta` 事件传给前端。
 - **工程可观测与可测试**：LangSmith 链路追踪、FastAPI SSE 流式输出、Golden Set 回放/评估脚本和 90+ 个 pytest 测试覆盖核心逻辑。
@@ -21,7 +21,7 @@
 | 模块 | 选型 |
 | --- | --- |
 | 语言 | Python 3.12 |
-| Agent 编排 | LangGraph StateGraph（Supervisor 模式） |
+| Agent 编排 | LangGraph StateGraph（循环 Supervisor 模式） |
 | LLM 应用框架 | LangChain |
 | Web 框架 | FastAPI + SSE |
 | 前端 | Vue3 + Vite + fetch SSE + Markdown 渲染 |
@@ -157,11 +157,12 @@ flowchart LR
     SUP -->|"规范/概念/条款"| QA["qa_node: RAG 问答"]
     SUP -->|"事务/任务/统计"| SQL["sql_node: NL2SQL + 报表"]
     SUP -->|"复合/换算/兜底"| GEN["general_node: ReAct 工具循环"]
+    SUP -->|"任务完成"| END["END"]
     GEN -->|"需要工具"| TOOLS["ToolNode"]
     TOOLS --> GEN
-    QA --> END["END"]
-    SQL --> END
-    GEN --> END
+    QA --> SUP
+    SQL --> SUP
+    GEN -->|"无需工具"| SUP
 ```
 
 ## API
@@ -199,9 +200,11 @@ SSE 事件：
 
 | 事件 | 含义 |
 | --- | --- |
-| `token` | LLM 输出文本 chunk |
+| `progress` | 当前执行的专业节点 |
+| `token` | worker 完成后追加的答案片段（含程序生成的 SQL 表格） |
 | `tool_call` | LLM 决定调用工具 |
 | `tool_result` | 工具执行结果预览 |
+| `result` | 最终 `answer / citations / artifacts`，前端据此替换正文，与非流式和会话落库一致 |
 | `meta` | 引用、图表 data URI、图表类型、表格行数 |
 | `done` | 流结束 |
 | `error` | 异常信息 |
@@ -212,8 +215,27 @@ SSE 事件：
 
 ```powershell
 cd D:\Project\pythonProject\PetroChat-Agent
-uv sync
+uv sync --frozen
 ```
+
+当前锁定 LangChain 1.4.0、langchain-core 1.6.3、langchain-openai 1.6.2、
+langchain-text-splitters 1.1.2 和 LangGraph 1.2.11，继续采用循环 Supervisor StateGraph。
+升级时移除了未使用的 `langchain-community`，无需引入 `langchain-classic`。
+MCP 适配器保留已验证的 0.1.14；DeepSeek 结构化输出仍显式使用
+`method="function_calling"`，百炼仍使用 1024 维字符串输入。
+PyCharm 请选择项目 `.venv/Scripts/python.exe`，同步依赖后重启运行中的 API。
+
+依赖与回归检查：
+
+```powershell
+uv pip check
+uv run --frozen pytest -q
+```
+
+`tests/test_llm_compatibility.py` 使用本地模拟 HTTP 服务检查真实 SDK 的结构化输出、
+流式工具调用和 Embedding 批处理，不需要模型密钥。检索器集成测试在 Chroma
+不可达或未配置百炼密钥时会跳过。Windows 终端运行含图标的 CLI 时，
+如遇 GBK 编码错误，可先设置 `$env:PYTHONIOENCODING="utf-8"`。
 
 ### 2. 配置环境变量
 
@@ -356,16 +378,42 @@ curl "http://127.0.0.1:8000/api/evaluation/runs?limit=10"
 
 原说明书规划了三维质检评分，但项目第二轮目标更偏向“可验证的数据问答能力”。因此 Phase 4 保留 Supervisor 多 Agent 目标，将子任务调整为规范问答、业务数据查询和复合工具调用，便于形成端到端的工程闭环。
 
-### 为什么图表走 SSE meta 侧信道？
+### 为什么图表通过请求结果交付？
 
-base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。后端只把 Markdown 表和图表标记写入答案，把真实图片放在 `meta.chart_data_uri`，前端可以独立渲染。
+base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。SQL 节点将报表写入本次图状态的 `artifacts`，General 的 SQL 工具通过 LangChain `ToolMessage.artifact` 返回报表，图片不会进入工具消息正文。两种接口使用相同的 `TurnResult`：`answer` 为本轮各 worker 正文的顺序拼接，`citations` 从该正文提取，`artifacts` 包含本轮报表列表。单任务直接交付，不额外调用汇总模型。
+
+SSE 在 worker 完成时追加正文，不转发 Supervisor 或 SQL 生成模型的内部文本；结束时发送权威 `result`。这是按 worker 输出的增量流，不是逐 token 的打字流。前端支持显示多张图表；`meta.chart_data_uri` 等旧单图字段仍兼容保留，取本次请求最后一张图。报表模块不再维护 `_LAST_REPORT` 全局变量，并对 matplotlib 绘图部分加锁，避免并发交叉使用 figure。
+
+会话历史仍保存文本答案；本次变更未增加历史图表持久化。
+
+### P1：明确子任务与执行预算
+
+首轮 Supervisor 通过 `function_calling` 输出最多 5 个子任务，每项包含 worker、独立输入和前序依赖序号。程序校验重复任务和非法依赖；worker 完成后仍回到 Supervisor，但后续调度依据 `pending → running → completed/failed/blocked` 记录完成，不再询问模型是否结束。简单问题只有一个任务，不额外调用总结模型。
+
+例如“解释 ITPM，并统计各专业事务数量”拆为 QA 和 SQL 两项独立任务。SQL 只收到统计子问题；只有显式依赖 QA 的任务才收到其文本结果。依赖失败会阻断下游，独立任务可以继续。General 只看到系统上下文、本任务输入及自身工具循环，避免重复处理其他 worker 的工作。依赖摘要最多 4000 字符，截断时附提示；完整正文和报表仍通过本轮结果交付。
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `AGENT_MODEL_CALL_LIMIT` | 12 | 图内聊天模型调用次数，含规划、SQL 生成/修复与 General 工具循环 |
+| `AGENT_TOOL_CALL_LIMIT` | 8 | ToolNode 调用次数，含失败尝试 |
+| `AGENT_TOOL_REPEAT_LIMIT` | 2 | 同名工具、相同参数的重复次数 |
+| `AGENT_TIMEOUT_SECONDS` | 180 | Agent 图执行时间上限（秒） |
+| `AGENT_TOOL_TIMEOUT_SECONDS` | 30 | 单次工具等待上限（秒） |
+| `AGENT_MODEL_TIMEOUT_SECONDS` | 60 | 模型/Embedding SDK 网络超时（秒） |
+| `AGENT_RECURSION_LIMIT` | 64 | 图步数上限，包含 General 工具循环 |
+
+API、CLI 和真实评估回放统一经过 `run_graph` / `stream_graph_events`。预算按请求隔离，在发起调用前计数；SDK 自动重试关闭，SQL 显式修复继续受同一预算约束。超时或预算耗尽后保留已完成结果，并返回 `status`、`tasks`、`usage`、`termination_reason`。`status` 为 `completed`、`partial` 或 `failed`，前端显示未完成提示；部分结果不抽取长期记忆，评估回放也不计为成功。
+
+预算边界是 Agent 图：前后会话读写、记忆召回/摘要不计入图耗时和调用数；Embedding 不计入聊天模型次数。MCP 计客户端工具调用，远端服务内部调用需要服务端另行控制。超时停止等待并阻止后续聊天模型调用和工具调度，已启动的同步 worker 线程/远端请求无法强制撤销，仍受各自网络和 SQL 超时约束。这里的调用预算不是 token 或金额限额。
 
 ## 测试状态
 
-当前测试覆盖 RAG 基础逻辑、工具、MCP 配置、SQL validator、SQL executor 探活、报表、Supervisor 和 API 结构。
+当前测试覆盖 RAG 基础逻辑、工具、MCP 配置、SQL validator、SQL executor 探活、报表、Supervisor、API 结构，以及复合任务最终答案、流式/非流式一致性、SQL/General 两种路径的并发报表隔离。
+
+P1 回归还覆盖子任务输入隔离、依赖失败、重复计划校验、模型/工具/重复调用/超时/图步数预算、并发请求隔离、部分结果接口一致性，以及真实 SDK 在发送 HTTP 请求前拦截超额调用。
 
 ```text
-101 passed, 3 warnings
+uv run --frozen pytest -q
 ```
 
 外部依赖类测试在 Chroma、Embedding Key 或 MySQL 不可达时会自动 skip，保证离线环境也能验证核心逻辑。
@@ -373,7 +421,6 @@ base64 PNG 通常有几十 KB，直接塞进 LLM 上下文浪费 token。后端�
 ## 后续可选增强
 
 - 端到端评估集：继续扩大 `scripts/replay_golden_set.py --mode agent --limit N` 的真实回放规模，基于已接入的 SQL 合约准确率、RAG MRR、证据覆盖率、忠实性代理指标和 Memory Hit Rate 做质量回归。
-- 并发报表侧信道：把模块级 `_LAST_REPORT` 改为 `contextvars`，避免多用户并发串数据。
 - 前端体验增强：补充历史记录搜索、错误重试、会话重命名和更细的路由可视化。
 - Docker 一键演示：补齐 MySQL 示例容器、Chroma 和 API 的 compose 编排。
 - LangSmith 截图：在 README 中补充 supervisor 路由、QA/SQL/General 三路 trace。

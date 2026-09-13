@@ -23,6 +23,11 @@ def qa_node(state: AgentState) -> dict:
     retriever = make_retriever(top_k=5)
     docs = retriever.invoke(question)
     logger.info("qa_node 召回 {} 条", len(docs))
+    if not docs:
+        return {
+            "messages": [AIMessage(content="未检索到足够的规范证据，暂时无法完成该子任务。")],
+            "retrieved": [], "citations": [],
+        }
 
     context = format_context(docs)
     long_term_context = state.get("long_term_context", "")

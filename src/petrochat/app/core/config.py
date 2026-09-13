@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,13 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
+    agent_model_call_limit: int = Field(default=12, ge=1, le=100)
+    agent_tool_call_limit: int = Field(default=8, ge=1, le=100)
+    agent_tool_repeat_limit: int = Field(default=2, ge=1, le=10)
+    agent_timeout_seconds: float = Field(default=180, gt=0, le=1800)
+    agent_tool_timeout_seconds: float = Field(default=30, gt=0, le=300)
+    agent_model_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    agent_recursion_limit: int = Field(default=64, ge=4, le=500)
 
     deepseek_api_key: SecretStr = Field(default=SecretStr(""))
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1")
@@ -57,6 +65,10 @@ class Settings(BaseSettings):
     mysql_password: SecretStr = Field(default=SecretStr(""))
     sql_default_limit: int = Field(default=1000)
     sql_timeout_seconds: int = Field(default=10)
+    sql_pipeline_mode: Literal["legacy", "optimized"] = Field(default="legacy")
+    sql_schema_narrowing_max_tables: int = Field(default=2)
+    sql_schema_narrowing_max_columns_per_table: int = Field(default=18)
+    sql_repair_max_attempts: int = Field(default=1)
     mysql_tables_whitelist: str = Field(default="affair,affair_task")
     mysql_enum_sample_threshold: int = Field(default=30)
     mysql_app_user: str = Field(default="")

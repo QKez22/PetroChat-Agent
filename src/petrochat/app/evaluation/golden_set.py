@@ -7,7 +7,6 @@ optionally score prediction JSONL files produced by future agent runs.
 
 from __future__ import annotations
 
-import csv
 import json
 import re
 from collections import Counter
@@ -15,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from petrochat.app.sql import validate_sql
+
+from ._io import loads_json, read_csv, read_json, read_jsonl
 
 REQUIRED_FILES = {
     "turns": "golden_dialogue_turns.csv",
@@ -40,35 +41,6 @@ DEFAULT_QUALITY_GATE_THRESHOLDS = {
     "memory_ignore_violation_rate": 0.0,
     "max_avg_latency_ms": 15000.0,
 }
-
-
-def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
-
-
-def _loads_json(value: str, default: Any) -> Any:
-    if value is None or value == "":
-        return default
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return default
 
 
 def _normalise_text(value: Any) -> str:
@@ -99,7 +71,7 @@ def _prediction_text(prediction: dict[str, Any]) -> str:
 def _memory_values_for_key(row: dict[str, str], key: str) -> list[str]:
     values: list[str] = []
     for field in ("memory_before", "memory_update", "memory_after"):
-        payload = _loads_json(row.get(field, ""), {})
+        payload = loads_json(row.get(field, ""), {})
         if isinstance(payload, dict) and key in payload:
             values.append(str(payload[key]))
     return values
@@ -159,9 +131,11 @@ def _rag_item_matches(row: dict[str, str], item: Any) -> bool:
     if expected_chunk and _contains_text(text, expected_chunk):
         return True
     if expected_source and _contains_text(text, expected_source):
-        if not expected_section or _contains_text(text, expected_section):
+        # source 命中后，若声明了 expected_section，section 也必须命中；
+        # 过去这里两个分支都 return True，导致 section 被默默忽略。
+        if not expected_section:
             return True
-        return True
+        return _contains_text(text, expected_section)
     return False
 
 
@@ -174,7 +148,7 @@ def _first_rag_rank(row: dict[str, str], retrieved: Any) -> int | None:
 
 
 def _must_point_coverage(row: dict[str, str], prediction: dict[str, Any]) -> tuple[int, int]:
-    points = [str(item) for item in _loads_json(row.get("must_include_points", ""), [])]
+    points = [str(item) for item in loads_json(row.get("must_include_points", ""), [])]
     if not points:
         return 0, 0
     answer = _normalise_text(prediction.get("answer", ""))
@@ -183,7 +157,7 @@ def _must_point_coverage(row: dict[str, str], prediction: dict[str, Any]) -> tup
 
 
 def _has_forbidden_point(row: dict[str, str], prediction: dict[str, Any]) -> bool:
-    points = [str(item) for item in _loads_json(row.get("forbidden_points", ""), [])]
+    points = [str(item) for item in loads_json(row.get("forbidden_points", ""), [])]
     answer = _normalise_text(prediction.get("answer", ""))
     return any(_contains_text(answer, point) for point in points)
 
@@ -205,12 +179,12 @@ def _required_path(golden_dir: Path, key: str) -> Path:
 
 def _load_golden(golden_dir: Path) -> dict[str, Any]:
     return {
-        "turns": _read_csv(_required_path(golden_dir, "turns")),
-        "memory": _read_csv(_required_path(golden_dir, "memory")),
-        "sql": _read_csv(_required_path(golden_dir, "sql")),
-        "rag": _read_csv(_required_path(golden_dir, "rag")),
-        "rubric": _read_csv(_required_path(golden_dir, "rubric")),
-        "validation": _read_json(_required_path(golden_dir, "validation")),
+        "turns": read_csv(_required_path(golden_dir, "turns")),
+        "memory": read_csv(_required_path(golden_dir, "memory")),
+        "sql": read_csv(_required_path(golden_dir, "sql")),
+        "rag": read_csv(_required_path(golden_dir, "rag")),
+        "rubric": read_csv(_required_path(golden_dir, "rubric")),
+        "validation": read_json(_required_path(golden_dir, "validation")),
     }
 
 
@@ -236,9 +210,9 @@ def _memory_contract(data: dict[str, Any]) -> dict[str, Any]:
     after_key_counts = []
     clarification_count = 0
     for row in memory_rows:
-        should_use = _loads_json(row.get("memory_should_use", ""), [])
-        should_ignore = _loads_json(row.get("memory_should_ignore", ""), [])
-        memory_after = _loads_json(row.get("memory_after", ""), {})
+        should_use = loads_json(row.get("memory_should_use", ""), [])
+        should_ignore = loads_json(row.get("memory_should_ignore", ""), [])
+        memory_after = loads_json(row.get("memory_after", ""), {})
         use_counts.append(len(should_use))
         ignore_counts.append(len(should_ignore))
         after_key_counts.append(len(memory_after) if isinstance(memory_after, dict) else 0)
@@ -282,9 +256,9 @@ def _sql_contract(data: dict[str, Any]) -> dict[str, Any]:
         if WRITE_SQL_PATTERN.search(sql_template):
             write_ops += 1
 
-        filters = _loads_json(row.get("expected_filters", ""), {})
+        filters = loads_json(row.get("expected_filters", ""), {})
         filter_counts.append(len(filters) if isinstance(filters, dict) else 0)
-        for table in _loads_json(row.get("expected_tables", ""), []):
+        for table in loads_json(row.get("expected_tables", ""), []):
             table_counter[str(table)] += 1
 
     total = len(rows) or 1
@@ -308,9 +282,9 @@ def _rag_contract(data: dict[str, Any]) -> dict[str, Any]:
     source_counter: Counter[str] = Counter()
 
     for row in rows:
-        keyword_counts.append(len(_loads_json(row.get("query_keywords", ""), [])))
-        must_point_counts.append(len(_loads_json(row.get("must_include_points", ""), [])))
-        forbidden_counts.append(len(_loads_json(row.get("forbidden_points", ""), [])))
+        keyword_counts.append(len(loads_json(row.get("query_keywords", ""), [])))
+        must_point_counts.append(len(loads_json(row.get("must_include_points", ""), [])))
+        forbidden_counts.append(len(loads_json(row.get("forbidden_points", ""), [])))
         source_counter[row.get("expected_source_file", "")] += 1
 
     total = len(rows) or 1
@@ -344,7 +318,7 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
     if prediction_path is None:
         return None
 
-    predictions = _read_jsonl(prediction_path)
+    predictions = read_jsonl(prediction_path)
     ok_count = sum(1 for row in predictions if row.get("status") == "ok")
     error_count = len(predictions) - ok_count
     latencies = [int(row.get("latency_ms") or 0) for row in predictions]
@@ -375,11 +349,11 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
             sql_is_valid = validate_sql(sql).ok
             if sql_is_valid:
                 sql_valid += 1
-        expected_tables = [str(t).lower() for t in _loads_json(row.get("expected_tables", ""), [])]
+        expected_tables = [str(t).lower() for t in loads_json(row.get("expected_tables", ""), [])]
         table_hit = bool(sql) and all(table in sql.lower() for table in expected_tables)
         if table_hit:
             sql_table_hits += 1
-        filters = _loads_json(row.get("expected_filters", ""), {})
+        filters = loads_json(row.get("expected_filters", ""), {})
         row_filter_total = 0
         row_filter_hits = 0
         if isinstance(filters, dict):
@@ -439,12 +413,12 @@ def _prediction_metrics(data: dict[str, Any], prediction_path: Path | None) -> d
         pred = pred_by_key.get((row["dialogue_id"], row["turn_id"]))
         if not pred:
             continue
-        should_use = [str(item) for item in _loads_json(row.get("memory_should_use", ""), [])]
+        should_use = [str(item) for item in loads_json(row.get("memory_should_use", ""), [])]
         if should_use:
             memory_required += 1
             if _memory_hit(row, pred, should_use):
                 memory_hits += 1
-        should_ignore = [str(item) for item in _loads_json(row.get("memory_should_ignore", ""), [])]
+        should_ignore = [str(item) for item in loads_json(row.get("memory_should_ignore", ""), [])]
         for ignored_key in should_ignore:
             memory_ignore_total += 1
             if _memory_ignore_violation(row, pred, ignored_key):

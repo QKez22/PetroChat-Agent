@@ -235,6 +235,13 @@ function traceLinkLabel(traceHint) {
   return traceHint?.traceUrl ? "打开 Trace" : "打开 LangSmith";
 }
 
+function messageCharts(message) {
+  const charts = (message.artifacts || [])
+    .filter((artifact) => artifact.chart_data_uri)
+    .map((artifact) => ({ uri: artifact.chart_data_uri, kind: artifact.chart_kind, rows: artifact.row_count }));
+  return charts.length ? charts : message.chart ? [message.chart] : [];
+}
+
 async function copyTraceText(text) {
   if (!text) {
     return;
@@ -906,6 +913,13 @@ async function sendQuestion() {
           assistant.content += data.text || "";
           scrollToBottom();
         },
+        result(data) {
+          assistant.content = data.answer || "";
+          assistant.citations = data.citations || [];
+          assistant.artifacts = data.artifacts || [];
+          assistant.taskStatus = data.status || "completed";
+          scrollToBottom();
+        },
         tool_call(data) {
           appendToolEvent("call", data);
         },
@@ -919,6 +933,7 @@ async function sendQuestion() {
           assistant.citations = data.citations || [];
           assistant.memoryUsed = data.long_term_memory_ids || [];
           assistant.memoryWritten = data.memory_written_ids || [];
+          assistant.artifacts = data.artifacts || assistant.artifacts || [];
           if (data.chart_data_uri) {
             assistant.chart = {
               uri: data.chart_data_uri,
@@ -943,12 +958,14 @@ async function sendQuestion() {
       });
       setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";
+      assistant.artifacts = fallback.artifacts || [];
+      assistant.taskStatus = fallback.status || "completed";
       assistant.citations = assistant.citations.length ? assistant.citations : fallback.citations || [];
       assistant.memoryUsed = fallback.memory_used || [];
       assistant.memoryWritten = fallback.memory_written || [];
     }
 
-    assistant.status = "done";
+    assistant.status = assistant.taskStatus && assistant.taskStatus !== "completed" ? "partial" : "done";
   } catch (error) {
     assistant.status = "error";
     assistant.content = error.name === "AbortError" ? "已停止生成。" : `请求失败：${error.message}`;
@@ -1194,6 +1211,7 @@ onMounted(async () => {
                 生成中
               </span>
               <span v-if="message.status === 'error'" class="error-label">错误</span>
+              <span v-if="message.status === 'partial'" class="error-label">任务未全部完成</span>
             </div>
 
             <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.content)"></div>
@@ -1210,12 +1228,12 @@ onMounted(async () => {
               </div>
             </div>
 
-            <figure v-if="message.chart" class="chart-panel">
+            <figure v-for="(chart, chartIndex) in messageCharts(message)" :key="chartIndex" class="chart-panel">
               <figcaption>
                 <BarChart3 :size="16" />
-                {{ message.chart.kind }} / {{ message.chart.rows }} 行
+                {{ chart.kind }} / {{ chart.rows }} 行
               </figcaption>
-              <img :src="message.chart.uri" alt="查询结果图表" />
+              <img :src="chart.uri" alt="查询结果图表" />
             </figure>
 
             <div v-if="message.citations?.length" class="citations">

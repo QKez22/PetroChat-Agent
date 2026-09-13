@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 from loguru import logger
 
 from ..core import AgentState, get_settings
@@ -17,12 +17,15 @@ from .nodes.qa_node import qa_node
 from .nodes.sql_node import sql_node
 from .nodes.supervisor_node import supervisor_node
 from .prompts import AGENT_SYSTEM_PROMPT
+from .runtime import guarded_async_tool, guarded_tool, tool_error
+from .tasks import wrap_worker
 
 
 def _resolve_tools():
     s = get_settings()
     if s.mcp_enabled:
         from ..mcp import get_loaded_tools
+
         try:
             tools = get_loaded_tools()
             logger.info("graph 使用 MCP 工具: {} 个", len(tools))
@@ -34,10 +37,23 @@ def _resolve_tools():
 
 
 def _route_after_supervisor(state: AgentState) -> str:
-    nxt = state.get("next", "general")
+    nxt = state.get("next", "FINISH")
+    if nxt == "FINISH":
+        return END
     if nxt not in {"qa", "sql", "general"}:
         return "general"
     return nxt
+
+
+def _route_after_general(state: AgentState) -> str:
+    """general 执行后：有 tool_calls 去 tools，否则回 supervisor 评估是否结束。"""
+    messages = state.get("messages") or []
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage):
+            if getattr(msg, "tool_calls", None):
+                return "tools"
+            return "supervisor"
+    return "supervisor"
 
 
 @lru_cache(maxsize=1)
@@ -47,20 +63,33 @@ def build_graph():
 
     builder = StateGraph(AgentState)
     builder.add_node("supervisor", supervisor_node)
-    builder.add_node("qa", qa_node)
-    builder.add_node("sql", sql_node)
-    builder.add_node("general", general_node)
-    builder.add_node("tools", ToolNode(tools))
+    builder.add_node("qa", wrap_worker("qa", qa_node))
+    builder.add_node("sql", wrap_worker("sql", sql_node))
+    builder.add_node("general", wrap_worker("general", general_node))
+    builder.add_node(
+        "tools",
+        ToolNode(
+            tools,
+            wrap_tool_call=guarded_tool,
+            awrap_tool_call=guarded_async_tool,
+            handle_tool_errors=tool_error,
+        ),
+    )
 
     builder.add_edge(START, "supervisor")
     builder.add_conditional_edges(
         "supervisor",
         _route_after_supervisor,
-        {"qa": "qa", "sql": "sql", "general": "general"},
+        {"qa": "qa", "sql": "sql", "general": "general", END: END},
     )
-    builder.add_edge("qa", END)
-    builder.add_edge("sql", END)
-    builder.add_conditional_edges("general", tools_condition)
+    # worker 执行完回 supervisor（而非直接 END），让 supervisor 评估是否还需要继续分派
+    builder.add_edge("qa", "supervisor")
+    builder.add_edge("sql", "supervisor")
+    builder.add_conditional_edges(
+        "general",
+        _route_after_general,
+        {"tools": "tools", "supervisor": "supervisor"},
+    )
     builder.add_edge("tools", "general")
     return builder.compile()
 
