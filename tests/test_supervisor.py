@@ -10,6 +10,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 from petrochat.app.agent.nodes.supervisor_node import RouteDecision, supervisor_node
 
 
+@pytest.fixture(autouse=True)
+def mock_plan_review(monkeypatch):
+    # 本文件测试路由；独立审核拒绝路径由语义契约测试覆盖。
+    monkeypatch.setattr("petrochat.app.agent.nodes.supervisor_node.review_plan", lambda *args: [])
+
+
 @pytest.mark.parametrize("route", ["qa", "sql", "general"])
 def test_supervisor_returns_state_update(route: str) -> None:
     """supervisor_node 返回 dict 含 next & intent 字段。"""
@@ -147,9 +153,12 @@ def test_supervisor_passes_worker_outputs_to_llm() -> None:
             return _FakeLLM()
 
     worker_output = AIMessage(content="仪表专业共 5 条事务")
-    with patch(
-        "petrochat.app.agent.nodes.supervisor_node.get_chat_llm",
-        return_value=_FakeChat(),
+    with (
+        patch(
+            "petrochat.app.agent.nodes.supervisor_node.get_chat_llm",
+            return_value=_FakeChat(),
+        ),
+        pytest.raises(ValueError, match="计划覆盖校验"),
     ):
         supervisor_node(
             {

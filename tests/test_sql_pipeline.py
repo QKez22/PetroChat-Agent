@@ -16,7 +16,9 @@ from petrochat.app.sql.schema_narrowing import (
 
 
 @pytest.fixture(autouse=True)
-def clear_settings_cache() -> None:
+def clear_settings_cache(monkeypatch) -> None:
+    # 本文件验证生成/执行修复链；语义审查在 test_semantic_contract.py 单独覆盖。
+    monkeypatch.setattr("petrochat.app.sql.agent.review_semantics", lambda *args: [])
     get_settings.cache_clear()
     clear_schema_narrowing_cache()
     yield

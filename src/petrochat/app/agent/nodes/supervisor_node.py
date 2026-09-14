@@ -8,13 +8,15 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from ...core import AgentState, get_chat_llm
+from ..requirements import extract_requirements, plan_coverage, review_plan
 from ..result import answer_parts
 from ..tasks import TaskSpec
 
@@ -155,17 +157,66 @@ def supervisor_node(state: AgentState) -> dict:
         messages = [SystemMessage(content=SUPERVISOR_PROMPT), *messages]
 
     llm = get_chat_llm().with_structured_output(RouteDecision, method="function_calling")
+    requirements = extract_requirements(question)
     decision: RouteDecision = llm.invoke(messages)
+    if not requirements and len(decision.tasks) == 1 and decision.tasks[0].worker == "sql":
+        from ...sql.contract import extract_contract
+
+        requirements = [
+            {
+                "id": 1,
+                "worker": "sql",
+                "source": question,
+                "start": 0,
+                "end": len(question),
+                "contract": extract_contract(question),
+            }
+        ]
+    needs_review = (
+        len(requirements) > 1
+        or len(decision.tasks) > 1
+        or any(t.worker == "sql" for t in decision.tasks)
+        or bool(re.search(r"[，；]|并|然后|以及|再", question))
+    )
+    errors, assigned = plan_coverage(requirements, decision.tasks)
+    if not errors and needs_review:
+        errors = review_plan(question, decision.tasks, state.get("short_term_messages"))
+    if errors:
+        decision = llm.invoke(
+            [
+                *messages,
+                HumanMessage(
+                    content=(
+                        "计划未覆盖原始需求，请修复全部 tasks，保留每项原文中的条件。\n"
+                        + "\n".join(errors)
+                        + "\n原始问题："
+                        + question
+                    )
+                ),
+            ]
+        )
+        errors, assigned = plan_coverage(requirements, decision.tasks)
+        if not errors and needs_review:
+            errors = review_plan(question, decision.tasks, state.get("short_term_messages"))
+        if errors:
+            raise ValueError("计划覆盖校验未通过：" + "；".join(errors))
     specs = decision.tasks
     if not specs and (decision.next != "FINISH" or not answer_parts(messages)):
         worker = decision.next if decision.next != "FINISH" else "general"
         specs = [TaskSpec(worker=worker, instruction=question)]
     if specs:
         tasks = [
-            {"id": i, **spec.model_dump(), "status": "pending", "summary": ""}
+            {
+                "id": i,
+                **spec.model_dump(),
+                "status": "pending",
+                "summary": "",
+                "requirements": assigned.get(i - 1, []),
+            }
             for i, spec in enumerate(specs, 1)
         ]
         update = _dispatch(state, tasks, step)
+        update["requirements"] = requirements
         update["intent"] = decision.reasoning
         return update
     logger.info(

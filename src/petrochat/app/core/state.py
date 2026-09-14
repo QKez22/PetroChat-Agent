@@ -33,6 +33,7 @@ class AgentState(TypedDict, total=False):
     retry_count: int
     supervisor_step: int
     tasks: list[dict[str, Any]]
+    requirements: list[dict[str, Any]]
     active_task_id: int
     termination_reason: str
     usage: dict[str, int]

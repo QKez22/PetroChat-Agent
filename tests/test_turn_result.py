@@ -271,6 +271,7 @@ def test_partial_result_is_consistent_and_not_written_to_long_term_memory(runtim
     monkeypatch.setenv("AGENT_MODEL_CALL_LIMIT", "1")
     get_settings.cache_clear()
     monkeypatch.setattr(supervisor_module, "get_chat_llm", Planner)
+    monkeypatch.setattr(supervisor_module, "review_plan", lambda *args: [])
     monkeypatch.setattr(graph_module, "supervisor_node", supervisor_node)
     monkeypatch.setattr(
         graph_module,

@@ -12,7 +12,9 @@ from typing import Any
 
 from loguru import logger
 
+from ..core.budget import current_budget
 from ..core.config import get_settings
+from .contract import extract_contract, review_semantics, validate_contract, validate_result
 from .executor import execute_sql
 from .generator import SqlPlan, generate_sql, repair_sql
 from .schema_narrowing import SchemaSelection, select_relevant_schema
@@ -22,7 +24,7 @@ from .validator import validate_sql
 @dataclass
 class Nl2SqlResult:
     ok: bool
-    stage: str = ""           # 失败时定位是哪一步：generate / validate / execute
+    stage: str = ""  # 失败时定位是哪一步：generate / validate / execute
     sql: str = ""
     reasoning: str = ""
     columns: list[str] = field(default_factory=list)
@@ -39,6 +41,9 @@ class Nl2SqlResult:
     repair_attempted: bool = False
     repair_succeeded: bool = False
     repair_error: str = ""
+    execution_ok: bool = False
+    semantic_status: str = "not_checked"
+    semantic_errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -69,7 +74,7 @@ def _nl2sql_legacy(question: str) -> Nl2SqlResult:
         logger.exception("generate 阶段失败")
         return Nl2SqlResult(ok=False, stage="generate", error=str(e), **metadata)
 
-    return _validate_and_execute(plan, metadata)
+    return _validate_and_execute(plan, metadata, question=question)
 
 
 def _nl2sql_optimized(question: str) -> Nl2SqlResult:
@@ -107,16 +112,20 @@ def _nl2sql_optimized(question: str) -> Nl2SqlResult:
             v = repaired_validation
             repair_succeeded = repaired_validation.ok
             if not repaired_validation.ok:
-                repair_error = f"初次校验错误：{first_error}；修复后错误：{repaired_validation.reason}"
+                repair_error = (
+                    f"初次校验错误：{first_error}；修复后错误：{repaired_validation.reason}"
+                )
         except Exception as e:
             logger.exception("repair 阶段失败")
             repair_error = f"初次校验错误：{first_error}；修复调用失败：{e}"
 
-    metadata.update({
-        "repair_attempted": repair_attempted,
-        "repair_succeeded": repair_succeeded,
-        "repair_error": repair_error,
-    })
+    metadata.update(
+        {
+            "repair_attempted": repair_attempted,
+            "repair_succeeded": repair_succeeded,
+            "repair_error": repair_error,
+        }
+    )
     return _validate_and_execute(
         plan,
         metadata,
@@ -147,11 +156,59 @@ def _validate_and_execute(
 
     if not v.ok:
         return Nl2SqlResult(
-            ok=False, stage="validate",
-            sql=plan.sql, reasoning=plan.reasoning, error=metadata.get("repair_error") or v.reason,
+            ok=False,
+            stage="validate",
+            sql=plan.sql,
+            reasoning=plan.reasoning,
+            error=metadata.get("repair_error") or v.reason,
             **metadata,
         )
 
+    contract = extract_contract(question)
+    semantic_errors = validate_contract(v.sql, contract)
+    checked = bool(question)
+    if checked and not semantic_errors:
+        try:
+            semantic_errors = review_semantics(question, v.sql)
+        except Exception as exc:
+            return Nl2SqlResult(
+                ok=False,
+                stage="semantic",
+                sql=v.sql,
+                semantic_status="failed",
+                error=f"语义审核不可用：{exc}",
+                **metadata,
+            )
+    if semantic_errors:
+        if get_settings().sql_repair_max_attempts > 0 and not metadata.get("repair_attempted"):
+            updated = {**metadata, "repair_attempted": True, "repair_succeeded": False}
+            try:
+                repaired = repair_sql(
+                    question=question,
+                    invalid_sql=v.sql,
+                    validation_error="语义验收失败：" + "；".join(semantic_errors),
+                    schema_md=schema_md or None,
+                )
+                result = _validate_and_execute(
+                    repaired, updated, question=question, schema_md=schema_md
+                )
+                result.repair_succeeded = result.ok
+                return result
+            except Exception as exc:
+                updated["repair_error"] = str(exc)
+                metadata = updated
+        return Nl2SqlResult(
+            ok=False,
+            stage="semantic",
+            sql=v.sql,
+            reasoning=plan.reasoning,
+            error="；".join(semantic_errors),
+            semantic_status="failed",
+            semantic_errors=semantic_errors,
+            **metadata,
+        )
+    if budget := current_budget():
+        budget.check()
     r = execute_sql(v.sql)
     if not r.ok and allow_execute_repair and not metadata.get("repair_attempted"):
         repaired = _repair_after_execute_error(
@@ -166,13 +223,32 @@ def _validate_and_execute(
 
     if not r.ok:
         return Nl2SqlResult(
-            ok=False, stage="execute",
-            sql=r.sql_executed, reasoning=plan.reasoning, error=r.error,
+            ok=False,
+            stage="execute",
+            sql=r.sql_executed,
+            reasoning=plan.reasoning,
+            error=r.error,
             **metadata,
         )
 
+    result_errors = validate_result(v.sql, contract, r.columns, r.row_count) if checked else []
+    if result_errors:
+        return Nl2SqlResult(
+            ok=False,
+            stage="semantic_result",
+            sql=r.sql_executed,
+            reasoning=plan.reasoning,
+            execution_ok=True,
+            semantic_status="failed",
+            semantic_errors=result_errors,
+            error="；".join(result_errors),
+            **metadata,
+        )
     return Nl2SqlResult(
-        ok=True, stage="ok",
+        ok=True,
+        stage="ok",
+        execution_ok=True,
+        semantic_status="passed" if checked else "not_checked",
         sql=r.sql_executed,
         reasoning=plan.reasoning,
         columns=r.columns,
@@ -228,32 +304,13 @@ def _repair_after_execute_error(
             **repair_metadata,
         )
 
-    repaired_result = execute_sql(validation.sql)
-    if not repaired_result.ok:
-        repair_metadata["repair_error"] = (
-            f"执行错误：{execute_error}；执行修复后仍失败：{repaired_result.error}"
-        )
-        return Nl2SqlResult(
-            ok=False,
-            stage="execute",
-            sql=repaired_result.sql_executed,
-            reasoning=repaired_plan.reasoning,
-            error=repair_metadata["repair_error"],
-            **repair_metadata,
-        )
-
-    repair_metadata["repair_succeeded"] = True
-    repair_metadata["repair_error"] = ""
-    return Nl2SqlResult(
-        ok=True,
-        stage="ok",
-        sql=repaired_result.sql_executed,
-        reasoning=repaired_plan.reasoning,
-        columns=repaired_result.columns,
-        rows=repaired_result.rows,
-        row_count=repaired_result.row_count,
-        **repair_metadata,
+    result = _validate_and_execute(
+        repaired_plan, repair_metadata, question=question, schema_md=schema_md
     )
+    result.repair_succeeded = result.ok
+    if not result.ok:
+        result.repair_error = f"执行错误：{execute_error}；修复后仍失败：{result.error}"
+    return result
 
 
 def _selection_metadata(selection: SchemaSelection) -> dict[str, Any]:

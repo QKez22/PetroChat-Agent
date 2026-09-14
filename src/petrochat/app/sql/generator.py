@@ -41,6 +41,11 @@ def _cached_examples() -> tuple[list[dict], list[str]]:
     return examples, knowledge
 
 
+def get_domain_knowledge() -> str:
+    """生成与验收共享项目维护的业务口径，避免两端对同一术语理解不同。"""
+    return "\n".join(_cached_examples()[1])
+
+
 def _build_system_prompt(schema_md: str | None = None, extra_rules: str = "") -> str:
     s = get_settings()
     schema_context = schema_md or _cached_schema_md()
@@ -70,6 +75,8 @@ def _build_system_prompt(schema_md: str | None = None, extra_rules: str = "") ->
 4. 默认会自动注入 LIMIT {s.sql_default_limit}，你不必显式写 LIMIT；除非用户问 Top-N。
 5. 字段使用反引号或不加都行；最终 SQL 要可直接执行。
 6. 如果用户消息包含【最近用户约束】或【SQL过滤提示】，这些是上游解析出的业务条件，必须优先继承并写入 WHERE/GROUP BY。
+7. 聚合输出使用明确别名。设备数量按本体设备编码去重；关联查询统计事务/任务也必须按对应业务 ID 去重。
+8. “各部门”不能直接按逗号拼接的 execution_department 分组；不清楚归属口径时不要擅自用部门组合代替。
 {extra_rules}
 """
 
@@ -135,6 +142,9 @@ def clear_caches() -> None:
     from .schema_narrowing import clear_schema_narrowing_cache
 
     clear_schema_narrowing_cache()
+    from .contract import contract_schemas
+
+    contract_schemas.cache_clear()
 
 
 def preview_schema_md() -> str:

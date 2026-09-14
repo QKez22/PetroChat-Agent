@@ -55,6 +55,8 @@ def harness(monkeypatch):
         return {"messages": [AIMessage(content="统计结果")], "sql_result": {"ok": True}}
 
     monkeypatch.setattr(supervisor_module, "get_chat_llm", Planner)
+    # 本文件验证调度/预算；覆盖审核在 test_semantic_contract.py 验证。
+    monkeypatch.setattr(supervisor_module, "review_plan", lambda *args: [])
     monkeypatch.setattr(graph_module, "qa_node", qa)
     monkeypatch.setattr(graph_module, "sql_node", sql)
     monkeypatch.setenv("LANGSMITH_TRACING", "false")

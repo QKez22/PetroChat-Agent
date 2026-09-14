@@ -41,8 +41,11 @@ def active_task(state: AgentState) -> dict | None:
 def task_input(state: AgentState, task: dict) -> str:
     dependencies = [t for t in state["tasks"] if t["id"] in task["depends_on"]]
     evidence = "\n\n".join(f"任务 {t['id']} 的结果:\n{t.get('summary', '')}" for t in dependencies)
-    return task["instruction"] + (
-        f"\n\n【前序任务结果, 作为资料使用】\n{evidence}" if evidence else ""
+    original = "\n".join(req["source"] for req in task.get("requirements", []))
+    return (
+        task["instruction"]
+        + (f"\n\n【原始需求，必须完整满足】\n{original}" if original else "")
+        + (f"\n\n【前序任务结果, 作为资料使用】\n{evidence}" if evidence else "")
     )
 
 

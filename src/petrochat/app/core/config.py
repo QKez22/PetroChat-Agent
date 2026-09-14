@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     agent_tool_timeout_seconds: float = Field(default=30, gt=0, le=300)
     agent_model_timeout_seconds: float = Field(default=60, gt=0, le=300)
     agent_recursion_limit: int = Field(default=64, ge=4, le=500)
+    # 只有业务确认后才配置；禁止把名称含 ITPM 擅自当成策略归属。
+    sql_strategy_field: str = ""
+    sql_strategy_values: dict[str, str] = Field(default_factory=dict)
 
     deepseek_api_key: SecretStr = Field(default=SecretStr(""))
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1")
