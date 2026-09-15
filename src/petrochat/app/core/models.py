@@ -96,6 +96,7 @@ class TurnResult(BaseModel):
     status: Literal["completed", "partial", "failed"] = "completed"
     tasks: list[dict] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
+    model_stats: list[dict] = Field(default_factory=list)
     termination_reason: str = ""
 
 

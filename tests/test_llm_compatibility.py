@@ -17,6 +17,35 @@ from petrochat.app.core.state import AgentState
 from petrochat.app.tools import convert_unit
 
 
+@pytest.mark.asyncio
+async def test_context_guard_and_metrics_cover_sync_async_sdk(compatible_api, monkeypatch):
+    from petrochat.app.core.budget import RunBudget, budget_scope
+    budget = RunBudget(4, 8, 2, 180)
+    with budget_scope(budget):
+        get_chat_llm().invoke("hello")
+        await get_chat_llm().ainvoke("hello async")
+    rows = budget.telemetry()
+    assert len(rows) == 2
+    assert all(row["run_id"] and row["outcome"] == "completed" for row in rows)
+    assert all(row["input_estimated_after"] > 0 and row["latency_ms"] >= 0 for row in rows)
+    assert all("actual_usage" in row for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_oversized_structured_tools_are_blocked_before_http(compatible_api, monkeypatch):
+    from petrochat.app.core.budget import BudgetExceeded
+    from petrochat.app.core.config import get_settings
+    monkeypatch.setenv("CONTEXT_INPUT_TOKEN_BUDGET", "300")
+    get_settings.cache_clear()
+    model = get_chat_llm().bind_tools([{"type": "function", "function": {
+        "name": "large", "description": "必须完整保留的工具约束" * 1000,
+        "parameters": {"type": "object", "properties": {}}
+    }}])
+    with pytest.raises(BudgetExceeded, match="上下文"):
+        await model.ainvoke("hello")
+    assert not compatible_api
+
+
 @pytest.fixture
 def compatible_api(monkeypatch):
     requests = []

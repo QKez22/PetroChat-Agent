@@ -8,13 +8,14 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from .budget import BudgetCallback
 from .config import get_settings
+from .context import ContextChatOpenAI
 
 
 @lru_cache(maxsize=1)
 def get_chat_llm() -> ChatOpenAI:
     """DeepSeek chat（用于 RAG 答案生成）。streaming=True 让 invoke 内部也走流式 API，token chunks 通过 LangChain callback 冒泡。"""
     s = get_settings()
-    return ChatOpenAI(
+    return ContextChatOpenAI(
         model=s.deepseek_chat_model,
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,
@@ -23,13 +24,14 @@ def get_chat_llm() -> ChatOpenAI:
         max_retries=0,
         callbacks=[BudgetCallback()],
         streaming=True,
+        stream_usage=True,
     )
 
 
 @lru_cache(maxsize=1)
 def get_reasoner_llm() -> ChatOpenAI:
     s = get_settings()
-    return ChatOpenAI(
+    return ContextChatOpenAI(
         model=s.deepseek_reasoner_model,
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,

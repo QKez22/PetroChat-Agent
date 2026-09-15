@@ -50,4 +50,5 @@ def query_database(question: str) -> tuple[str, dict]:
         f"**结果（{result.row_count} 行）:**\n{report.markdown}"
         f"{chart_note}"
     )
-    return content, {"reports": [report.to_artifact()]}
+    return content, {"reports": [report.to_artifact()],
+                     "query_result": {"sql": result.sql, "columns": result.columns, "rows": result.rows}}

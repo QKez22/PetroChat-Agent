@@ -37,3 +37,4 @@ class AgentState(TypedDict, total=False):
     active_task_id: int
     termination_reason: str
     usage: dict[str, int]
+    model_stats: list[dict[str, Any]]

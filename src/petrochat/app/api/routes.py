@@ -45,7 +45,7 @@ def _extract_answer_and_citations(state: dict) -> tuple[str, list[str]]:
 
 def _to_history_payload(messages: list[StoredMessage]) -> list[dict[str, str]]:
     """转成 build_initial_state 需要的轻量历史消息。"""
-    return [{"role": m.role, "content": m.content} for m in messages if m.content]
+    return [{"role": m.role, "content": m.content, "status": getattr(m, "status", "unknown")} for m in messages if m.content]
 
 
 def _guess_route(state: dict, answer: str) -> str:
@@ -165,6 +165,7 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
         answer,
         route=route,
         latency_ms=latency_ms,
+        status=turn_result.status,
     )
     _refresh_summary_after_turn(store, session_id)
     written = (
@@ -178,6 +179,7 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
         status=turn_result.status,
         tasks=turn_result.tasks,
         usage=turn_result.usage,
+        model_stats=turn_result.model_stats,
         termination_reason=turn_result.termination_reason,
         score=None,
         session_id=session_id,
@@ -296,6 +298,7 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
                 final_answer,
                 route=route,
                 latency_ms=latency_ms,
+                status=turn_result.status,
             )
             _refresh_summary_after_turn(store, session_id)
         written = (
@@ -321,6 +324,7 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
         meta.update(
             status=turn_result.status, tasks=turn_result.tasks, usage=turn_result.usage,
             termination_reason=turn_result.termination_reason,
+            model_stats=turn_result.model_stats,
         )
         # 兼容旧客户端的单图字段, 完整报表列表通过 artifacts 提供。
         chart = next((a for a in reversed(turn_result.artifacts) if a.chart_data_uri), None)

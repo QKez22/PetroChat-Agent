@@ -11,10 +11,12 @@ from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import inspect, text
+
 UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 
 from ..sql.engine import get_app_engine as get_engine
+from .outcome import decode_answer, encode_answer
 
 
 def _now_db() -> str:
@@ -44,6 +46,7 @@ class StoredMessage:
     route: str | None
     latency_ms: int | None
     created_at: str
+    status: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,7 @@ class ConversationStore:
         *,
         route: str | None = None,
         latency_ms: int | None = None,
+        status: str = "unknown",
     ) -> StoredMessage:
         if role not in {"user", "assistant"}:
             raise ValueError(f"unsupported role: {role}")
@@ -153,6 +157,7 @@ class ConversationStore:
             route=route,
             latency_ms=latency_ms,
             created_at=now,
+            status=status,
         )
         with self._lock, self.engine.begin() as conn:
             conn.execute(
@@ -166,7 +171,7 @@ class ConversationStore:
                     "id": message_id,
                     "conversation_id": self._id_value(conversation_id),
                     "role": role,
-                    "content": content,
+                    "content": encode_answer(content, status) if role == "assistant" else content,
                     "created_at": now,
                 },
             )
@@ -184,6 +189,7 @@ class ConversationStore:
         *,
         route: str | None = None,
         latency_ms: int | None = None,
+        status: str = "unknown",
     ) -> None:
         self.append_message(conversation_id, "user", question)
         if answer.strip():
@@ -193,6 +199,7 @@ class ConversationStore:
                 answer,
                 route=route,
                 latency_ms=latency_ms,
+                status=status,
             )
 
     def recent_messages(self, conversation_id: str, turns: int) -> list[StoredMessage]:
@@ -383,11 +390,13 @@ class ConversationStore:
             return result.rowcount > 0
 
     def _row_to_message(self, row: Any) -> StoredMessage:
+        content, status = decode_answer(str(row["content"])) if row["role"] == "assistant" else (str(row["content"]), "unknown")
         return StoredMessage(
             id=str(row["id"]),
             conversation_id=str(row["conversation_id"]),
             role=str(row["role"]),
-            content=str(row["content"]),
+            content=content,
+            status=status,
             route=None,
             latency_ms=None,
             created_at=self._stringify_time(row["created_at"]),

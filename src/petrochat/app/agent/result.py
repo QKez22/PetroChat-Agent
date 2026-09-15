@@ -55,5 +55,6 @@ def build_turn_result(state: dict[str, Any]) -> TurnResult:
         status=("partial" if completed else "failed") if incomplete else "completed",
         tasks=[{k: v for k, v in task.items() if k != "message_start"} for task in tasks],
         usage=state.get("usage") or {},
+        model_stats=state.get("model_stats") or [],
         termination_reason=state.get("termination_reason", ""),
     )

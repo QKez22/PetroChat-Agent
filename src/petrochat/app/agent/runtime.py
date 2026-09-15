@@ -77,7 +77,7 @@ async def stream_graph_events(graph, state: dict) -> AsyncIterator[dict]:
                             }:
                                 snapshot = _merge(snapshot, output)
                             elif not parents:
-                                output = {**output, "usage": budget.usage()}
+                                output = {**output, "usage": budget.usage(), "model_stats": budget.telemetry()}
                                 event = {**event, "data": {**event["data"], "output": output}}
                     yield event
         except (BudgetExceeded, TimeoutError, GraphRecursionError) as exc:
@@ -105,6 +105,7 @@ async def stream_graph_events(graph, state: dict) -> AsyncIterator[dict]:
                     "termination_reason": reason,
                     "next": "FINISH",
                     "usage": budget.usage(),
+                    "model_stats": budget.telemetry(),
                 },
             )
             yield {

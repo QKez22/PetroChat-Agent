@@ -31,9 +31,15 @@ def format_context(documents: list) -> str:
     if not documents:
         return "（没有找到相关参考资料）"
     parts = []
+    seen = set()
     for d in documents:
         sec = d.metadata.get("section_number", "?")
-        parts.append(f"[{sec}] {d.page_content}")
+        source = d.metadata.get("source_doc", "")
+        key = (source, sec, d.page_content)
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(f"[{sec}] {source}\n{d.page_content}")
     return "\n\n".join(parts)
 
 
@@ -52,6 +58,7 @@ AGENT_SYSTEM_PROMPT = """你是中国石化炼化企业的助理。你能回答�
 
 计算类：
 5. convert_unit(value, from_unit, to_unit) — 单位换算（压力/温度/流量/长度/重量/体积）。
+6. read_report_page(report_id, offset, page_size) — 查询返回报表预览时按需读取其余行；预览不是完整结果。
 
 【调用策略】
 - 看到"查""统计""有哪些""清单""分布"+ 业务数据词（事务/任务/部门/设备/截止）→ query_database

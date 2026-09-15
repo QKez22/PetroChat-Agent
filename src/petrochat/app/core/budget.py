@@ -16,6 +16,9 @@ class BudgetExceeded(RuntimeError):
     """在发起下一次外部调用前终止执行。"""
 
 
+model_run_id: ContextVar[str] = ContextVar("petrochat_model_run", default="")
+
+
 @dataclass
 class RunBudget:
     model_limit: int
@@ -27,6 +30,8 @@ class RunBudget:
     tool_calls: int = 0
     cancelled: bool = False
     reason: str = ""
+    model_stats: dict[str, dict] = field(default_factory=dict)
+    report_cache: dict[str, dict] = field(default_factory=dict)
     repeats: dict[str, int] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
 
@@ -62,6 +67,17 @@ class RunBudget:
     def usage(self) -> dict[str, int]:
         return {"model_calls": self.model_calls, "tool_calls": self.tool_calls}
 
+    def update_model_stats(self, run_id: str, values: dict) -> None:
+        with self.lock:
+            self.model_stats.setdefault(run_id, {}).update(values)
+
+    def telemetry(self) -> list[dict]:
+        with self.lock:
+            return [
+                {"run_id": key, **{k: v for k, v in row.items() if k != "started"}}
+                for key, row in self.model_stats.items()
+            ]
+
 
 _CURRENT: ContextVar[RunBudget | None] = ContextVar("petrochat_run_budget", default=None)
 
@@ -96,3 +112,42 @@ class BudgetCallback(BaseCallbackHandler):
     def on_chat_model_start(self, serialized, messages, **kwargs):
         if budget := current_budget():
             budget.reserve("model")
+            run_id = str(kwargs.get("run_id", ""))
+            model_run_id.set(run_id)
+            budget.update_model_stats(
+                run_id,
+                {
+                    "node": (kwargs.get("metadata") or {}).get("langgraph_node", "model"),
+                    "started": time.monotonic(),
+                    "outcome": "running",
+                },
+            )
+
+    def on_llm_end(self, response, **kwargs):
+        if budget := current_budget():
+            run_id = str(kwargs.get("run_id", ""))
+            started = budget.model_stats.get(run_id, {}).get("started", time.monotonic())
+            usage = None
+            for generations in response.generations:
+                for generation in generations:
+                    usage = (
+                        getattr(getattr(generation, "message", None), "usage_metadata", None)
+                        or usage
+                    )
+            budget.update_model_stats(
+                run_id,
+                {
+                    "outcome": "completed",
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                    "actual_usage": usage,
+                },
+            )
+
+    def on_llm_error(self, error, **kwargs):
+        if budget := current_budget():
+            run_id = str(kwargs.get("run_id", ""))
+            started = budget.model_stats.get(run_id, {}).get("started", time.monotonic())
+            budget.update_model_stats(
+                run_id,
+                {"outcome": "failed", "latency_ms": int((time.monotonic() - started) * 1000)},
+            )

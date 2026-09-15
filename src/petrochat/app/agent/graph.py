@@ -12,6 +12,7 @@ from loguru import logger
 from ..core import AgentState, get_settings
 from ..memory import build_conversation_summary_message, build_memory_system_message
 from ..tools import ALL_TOOLS as LOCAL_TOOLS
+from ..tools.report_page import read_report_page
 from .nodes.general_node import general_node
 from .nodes.qa_node import qa_node
 from .nodes.sql_node import sql_node
@@ -29,7 +30,7 @@ def _resolve_tools():
         try:
             tools = get_loaded_tools()
             logger.info("graph 使用 MCP 工具: {} 个", len(tools))
-            return tools
+            return [*tools, read_report_page]
         except Exception as exc:
             logger.warning("MCP 工具不可用，graph 降级使用本地工具: {}", exc)
     logger.info("graph 使用本地工具: {} 个", len(LOCAL_TOOLS))
@@ -121,13 +122,19 @@ def build_initial_state(
         if role == "user":
             messages.append(HumanMessage(content=content))
         elif role == "assistant":
-            messages.append(AIMessage(content=content))
+            status = item.get("status", "unknown")
+            prefix = f"[历史任务状态: {status}; 不能视为全部完成]\n" if status in {"partial", "failed"} else ""
+            messages.append(AIMessage(content=prefix + content))
     messages.append(HumanMessage(content=question))
+    sql_history = history
+    if conversation_summary.startswith("【当前用户约束") and "[END_CONSTRAINTS]" in conversation_summary:
+        # SQL 只继承当前约束快照, 避免 hints 将已失效的历史部门值重新并入筛选。
+        sql_history = [{"role": "user", "content": conversation_summary.split("[END_CONSTRAINTS]", 1)[0]}]
     return {
         "question": question,
         "session_id": session_id or "",
         "user_id": user_id,
-        "short_term_messages": history,
+        "short_term_messages": sql_history,
         "conversation_summary": conversation_summary,
         "long_term_memories": long_term_memories,
         "long_term_context": long_term_context,

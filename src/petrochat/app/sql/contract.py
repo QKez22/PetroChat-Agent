@@ -244,7 +244,7 @@ def review_semantics(question: str, sql: str) -> list[str]:
                 ),
                 HumanMessage(
                     content=f"用户需求：\n{question}\nSQL：\n{sql}\n真实 schema：\n"
-                    + format_schemas_for_llm(contract_schemas())
+                    + format_schemas_for_llm(schemas_for_sql(sql, contract_schemas()))
                     + f"\n已确认的策略映射：{get_settings().sql_strategy_field} {get_settings().sql_strategy_values}"
                 ),
             ]
@@ -253,6 +253,15 @@ def review_semantics(question: str, sql: str) -> list[str]:
     if not result.passed or result.issues or not result.evidence:
         return result.issues or ["语义审核没有提供足够的需求覆盖证据"]
     return []
+
+
+def schemas_for_sql(sql: str, schemas: list[dict]) -> list[dict]:
+    """按实际引用表精简 schema, 保留该表完整字段以便发现漏筛选/错误映射。"""
+    tree = sqlglot.parse_one(sql, dialect="mysql")
+    tables = {table.name for table in tree.find_all(exp.Table)}
+    if field := get_settings().sql_strategy_field:
+        tables.add(field.split(".", 1)[0])
+    return [schema for schema in schemas if schema["table_name"] in tables]
 
 
 def validate_result(sql: str, contract: dict, columns: list[str], row_count: int) -> list[str]:

@@ -108,9 +108,8 @@ def wrap_worker(worker: str, function: Callable) -> Callable:
         record = next(t for t in tasks if t["id"] == task["id"])
         record.update(
             status="failed" if failed or not summary else "completed",
-            summary=summary
-            if len(summary) <= 4000
-            else summary[:4000] + "\n[结果已截断, 不能据此断言完整范围]",
+            summary=summary,
+            result_ref=f"task:{task['id']}",
         )
         return {**output, "tasks": tasks}
 
