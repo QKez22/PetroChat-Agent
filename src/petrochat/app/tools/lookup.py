@@ -11,6 +11,7 @@ from __future__ import annotations
 from langchain_core.tools import tool
 
 from ..rag import query as _vector_query
+from ..rag.vector_store import get_chunks, resolve_sources
 
 
 @tool
@@ -26,15 +27,14 @@ def lookup_section(source_doc_hint: str, section_number: str) -> str:
     Returns:
         匹配到的条款全文（可能多条），找不到返回提示语。
     """
-    # Chroma 的 where 过滤不支持 LIKE，只支持精确等值 / $in / $contains。
-    # 做法：用 $eq section_number + 用 contains 查 source_doc，再 Python 端按 source_doc_hint 过滤
-    where = {"section_number": {"$eq": section_number.strip()}}
+    # 文档名先解析为完整标识，再与条款号一起下推；不受向量 TopK 截断影响。
     try:
-        results = _vector_query(
-            query_text=section_number,  # 用编号作 query 提升排序合理性，但主要靠 where 过滤
-            top_k=20,
-            where=where,
-        )
+        sources = resolve_sources(source_doc_hint)
+        if not sources:
+            return "未找到指定规范文档。"
+        results = get_chunks(where={"$and": [
+            {"section_number": section_number.strip()}, {"source_doc": {"$in": sources}},
+        ]})
     except Exception as e:
         return f"查询失败: {e}"
 
@@ -55,7 +55,7 @@ def lookup_section(source_doc_hint: str, section_number: str) -> str:
     return "\n\n---\n\n".join(
         f"[出自 {r.metadata.get('source_doc', '?')} 第 {r.metadata.get('section_number', '?')} 条]\n"
         f"{r.content}"
-        for r in results[:5]
+        for r in sorted(results, key=lambda c: c.chunk_id)
     )
 
 
@@ -73,9 +73,12 @@ def search_within_doc(query: str, source_doc_hint: str, top_k: int = 5) -> str:
     Returns:
         命中的条款集合，含章节号与原文。
     """
-    # Chroma 的 metadata 过滤不支持 LIKE，先全集合 query 再 Python 端过滤
     try:
-        results = _vector_query(query_text=query, top_k=top_k * 4)
+        sources = resolve_sources(source_doc_hint)
+        if not sources:
+            return "未找到指定规范文档。"
+        results = _vector_query(query_text=query, top_k=max(1, min(top_k, 30)),
+                                where={"source_doc": {"$in": sources}})
     except Exception as e:
         return f"检索失败: {e}"
 
