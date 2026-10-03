@@ -16,6 +16,7 @@ from typing import Any
 from petrochat.app.sql import validate_sql
 
 from ._io import loads_json, read_csv, read_json, read_jsonl
+from ..rag.corpus import source_key
 
 REQUIRED_FILES = {
     "turns": "golden_dialogue_turns.csv",
@@ -124,18 +125,23 @@ def _retrieved_item_text(item: Any) -> str:
 
 
 def _rag_item_matches(row: dict[str, str], item: Any) -> bool:
-    text = _retrieved_item_text(item)
+    if not isinstance(item, dict):
+        return False
+    metadata = item.get("metadata") or {}
     expected_chunk = row.get("expected_chunk_id", "")
     expected_source = row.get("expected_source_file", "")
     expected_section = row.get("expected_section", "")
-    if expected_chunk and _contains_text(text, expected_chunk):
+    actual_id = item.get("chunk_id") or metadata.get("chunk_id") or item.get("id")
+    if expected_chunk and expected_chunk == actual_id:
         return True
-    if expected_source and _contains_text(text, expected_source):
+    actual_source = item.get("source_doc") or item.get("source") or metadata.get("source_doc") or metadata.get("source") or ""
+    actual_section = item.get("section_number") or item.get("section") or metadata.get("section_number") or metadata.get("section") or ""
+    if expected_source and source_key(expected_source) == source_key(actual_source):
         # source 命中后，若声明了 expected_section，section 也必须命中；
         # 过去这里两个分支都 return True，导致 section 被默默忽略。
         if not expected_section:
             return True
-        return _contains_text(text, expected_section)
+        return str(actual_section).strip() == expected_section.strip()
     return False
 
 
