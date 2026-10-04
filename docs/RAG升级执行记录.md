@@ -31,3 +31,15 @@
 同一快照、同一 12 道开发题：向量 Recall@5=10/12，RRF=11/12，RRF+真实重排=12/12、MRR=0.9583、重排降级 0 次。重排 P95 约 850ms（包含重排 HTTP，但查询 embedding 命中缓存，不能视为生产端到端延迟）。留出题仍未用于调参。
 
 Docker 启动后补跑验证：32 项全部通过，无跳过，包含真实 Chroma HTTP + 百炼 embedding/重排集成测试。使用独立临时测试集合并在测试后清理，未重置业务集合。jieba 有 3 条上游正则转义 SyntaxWarning，不影响执行。
+
+## 步骤 4：版本策略与原子快照
+
+新增 MySQL `agent_rag_manifest` / `agent_rag_active` 保存不可变版本与权限清单、内容哈希和活动索引指针。构建使用新 Chroma 集合，完整写入后事务切换；失败不覆盖旧集合。所有读路径共用请求级身份、业务日期及快照，向量、BM25、精确查询和一跳引用扩展统一过滤。有效期为 `[from, to)`；未知版本不支持指定日期的有效性断言，重叠版本阻断查询。
+
+兼容迁移：默认 `RAG_CATALOG_ENABLED=false`，保持旧索引可用，但此模式不提供版本/文档权限保证。完成管理员建表、显式策略清单发布后设置为 `true` 并重启 API；未提供身份上下文或发布快照时拒绝查询。新增聊天可选字段 `rag_as_of`（ISO 日期）；身份来自现有 JWT 解析路径。版本 ID 和 document_id 需管理员核对，同一规范不同版本应使用相同 document_id。`allowed_users` 默认空列表（拒绝所有访问），`["*"]` 表示现有全体登录用户共享，仅由管理员显式填写。
+
+发布命令：`uv run python scripts/publish_rag_snapshot.py --corpus data/runtime/rag/corpus.json --policies data/runtime/rag/policies.json`。策略清单为 VersionPolicy 对象列表，字段含 source_doc、document_id、version_id、status、effective_from、effective_to、allowed_users。未知日期必须用 status=unknown，不使用文件名年份替代生效日。
+
+阶段验证：19 项版本策略/Chroma 检索测试通过；29 项现有 Agent runtime/API 回归通过。真实 MySQL 建表被应用账号正确拒绝（CREATE denied），未提升权限、未发布新活动索引。管理员执行 `scripts/migrations/004_rag_catalog.sql` 后继续验收，再提交步骤 4。原文关系当前按规则按需解析，仅扩展同版本明确的条款号，最多一跳四个片段；跨文档、表格脚注及人工核对关系管理尚未覆盖。
+
+管理员执行迁移后，已核实两张表均具备 SELECT/INSERT/UPDATE/DELETE 权限。真实 MySQL + Chroma 已成功发布 1121 片段的新快照并完成带授权过滤的混合检索；原集合未覆盖。现有两份文档仍标记 unknown，仅作为参考资料，不支持历史有效性断言。默认配置保持兼容模式，生产启用版本权限策略需显式设置 RAG_CATALOG_ENABLED=true。

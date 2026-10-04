@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from operator import add
+from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -15,6 +16,7 @@ class AgentState(TypedDict, total=False):
     """LangGraph 节点间共享的状态对象。"""
 
     question: str
+    rag_as_of: date | None
     session_id: str
     user_id: str
     messages: Annotated[list[BaseMessage], add_messages]

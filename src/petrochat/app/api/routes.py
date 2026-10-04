@@ -141,6 +141,7 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
             graph,
             build_initial_state(
                 req.question,
+                rag_as_of=req.rag_as_of,
                 session_id=session_id,
                 user_id=user_id,
                 history=prompt_context.history,
@@ -248,6 +249,7 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
         )
         state = build_initial_state(
             req.question,
+            rag_as_of=req.rag_as_of,
             session_id=session_id,
             user_id=user_id,
             history=prompt_context.history,

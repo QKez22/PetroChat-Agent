@@ -128,9 +128,10 @@ def query(
     Returns:
         按相似度排序的 RetrievedChunk 列表（score 越小越相关，cosine distance）。
     """
-    collection = get_or_create_collection(collection_name)
+    from .catalog import scoped_query
+    where, selected_collection = scoped_query(where, collection_name)
+    collection = get_client().get_collection(selected_collection or get_settings().chroma_collection)
     embedder = get_embedding()
-
     # 查询向量（注意 embed_query 跟 embed_documents 在某些模型上有不同 prompt prefix）
     query_emb = embedder.embed_query(query_text)
 
@@ -161,6 +162,8 @@ def query(
 
 def get_chunks(where: dict | None = None, collection_name: str | None = None) -> list[RetrievedChunk]:
     """分页按元数据读取原文，不调用 embedding、不创建集合。"""
+    from .catalog import scoped_query
+    where, collection_name = scoped_query(where, collection_name)
     collection = get_client().get_collection(collection_name or get_settings().chroma_collection)
     chunks, offset = [], 0
     while True:

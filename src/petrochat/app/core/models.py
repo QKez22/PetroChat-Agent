@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -72,6 +72,7 @@ class ChatRequest(BaseModel):
     """前端 → 后端的对话请求。"""
 
     question: str = Field(min_length=1, max_length=2000)
+    rag_as_of: date | None = Field(default=None, description="规范适用日期；历史查询须显式指定")
     session_id: str | None = Field(default=None, description="多轮会话 ID")
     user_id: str = Field(default="default", min_length=1, max_length=64)
 

@@ -10,6 +10,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph.message import add_messages
 
 from ..core import get_settings
+from ..rag.catalog import request_scope
 from ..core.budget import BudgetExceeded, RunBudget, budget_scope, current_budget, reserve_tool
 
 
@@ -56,7 +57,7 @@ async def stream_graph_events(graph, state: dict) -> AsyncIterator[dict]:
         settings.agent_timeout_seconds,
     )
     snapshot = dict(state)
-    with budget_scope(budget):
+    with budget_scope(budget), request_scope(state.get("user_id", ""), state.get("rag_as_of")):
         try:
             async with asyncio.timeout(settings.agent_timeout_seconds):
                 async for event in graph.astream_events(

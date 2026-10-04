@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     chroma_port: int = Field(default=8001)
     chroma_collection: str = Field(default="petrochat_specs")
     rag_mode: Literal["vector", "hybrid", "hybrid_rerank"] = "hybrid_rerank"
+    rag_catalog_enabled: bool = False
     rag_candidate_k: int = Field(default=30, ge=5, le=100)
     rag_rerank_model: str = "gte-rerank-v2"
     rag_rerank_url: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"

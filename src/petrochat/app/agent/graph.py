@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from datetime import date
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -99,6 +100,7 @@ def build_initial_state(
     question: str,
     *,
     session_id: str | None = None,
+    rag_as_of: date | None = None,
     user_id: str = "default",
     history: list[dict] | None = None,
     long_term_memories: list[dict] | None = None,
@@ -132,6 +134,7 @@ def build_initial_state(
         sql_history = [{"role": "user", "content": conversation_summary.split("[END_CONSTRAINTS]", 1)[0]}]
     return {
         "question": question,
+        "rag_as_of": rag_as_of,
         "session_id": session_id or "",
         "user_id": user_id,
         "short_term_messages": sql_history,
