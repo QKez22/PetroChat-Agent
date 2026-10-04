@@ -98,6 +98,11 @@ def test_missing_historical_date_does_not_retrieve():
     assert qa_node({"question": "去年规范要求是什么？"})["rag_status"] == "needs_clarification"
 
 
+def test_unknown_version_cannot_assert_compliance():
+    state = build_evidence_graph(lambda q: [source()]).invoke({"question": "这是否符合现行规范？"})
+    assert state["status"] == "needs_review" and state["attempts"] == 1
+
+
 def test_legacy_cannot_claim_historical_validity(monkeypatch):
     from petrochat.app.core import get_settings
 

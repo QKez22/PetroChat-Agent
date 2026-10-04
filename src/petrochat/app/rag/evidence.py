@@ -139,8 +139,10 @@ def check_support(question: str, draft: Draft, docs: list[Document]) -> bool:
             ]
         )
     )
-    return verdict.answers_question and not verdict.conflict and sorted(verdict.supported_claims) == list(
-        range(len(draft.claims))
+    return (
+        verdict.answers_question
+        and not verdict.conflict
+        and sorted(verdict.supported_claims) == list(range(len(draft.claims)))
     )
 
 
@@ -151,6 +153,10 @@ def build_evidence_graph(retrieve=None, generator=None, verifier=None):
     def fetch(state):
         try:
             docs = expand_references(retrieve(state.get("query") or state["question"]))
+            if re.search(r"现行|有效期|生效|合规|适用版本", state["question"]) and any(
+                d.metadata.get("version_status") != "verified" for d in docs
+            ):
+                raise PolicyError("文档生效日期尚未核实，无法判断现行有效性或合规性。")
             if sum(len(d.page_content) for d in docs) > 14000:
                 raise PolicyError("证据超出上下文预算，请缩小问题范围。")
             return {"docs": docs, "attempts": state.get("attempts", 0) + 1, "status": "retrieved"}

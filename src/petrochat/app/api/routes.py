@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import date
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -34,6 +35,27 @@ from ..memory import (
 from .auth import CurrentUserDep
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+
+@router.get("/rag/evidence/{evidence_id}", summary="重新鉴权后查看当前快照原文")
+def evidence_preview(evidence_id: str, user: CurrentUserDep, rag_as_of: date | None = None):
+    import re
+    from langchain_core.documents import Document
+    from ..rag.catalog import PolicyError, request_scope
+    from ..rag.evidence import evidence_id as make_evidence_id
+    from ..rag.vector_store import get_chunks
+    if not re.fullmatch(r"E-[0-9a-f]{16}", evidence_id):
+        raise HTTPException(status_code=404, detail="证据不存在或不可访问")
+    try:
+        with request_scope(user.user_id, rag_as_of):
+            for chunk in get_chunks():
+                doc = Document(page_content=chunk.content, metadata={**chunk.metadata, "chunk_id": chunk.chunk_id})
+                if make_evidence_id(doc) == evidence_id:
+                    return {"evidence_id": evidence_id, "content": chunk.content,
+                            **{key: chunk.metadata.get(key, "") for key in ("source_doc", "section_number", "snapshot_id", "version_id", "version_status", "effective_from", "effective_to")}}
+    except PolicyError:
+        pass
+    raise HTTPException(status_code=404, detail="证据不存在或不可访问")
 
 _CITATION_PAT = CITATION_PATTERN
 
@@ -276,6 +298,8 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
                         emitted_parts.append(part)
                         yield _sse("token", {"text": prefix + part})
             elif kind == "on_chain_start" and len(parents) == 1 and name in {"qa", "sql", "general"}:
+                yield _sse("progress", {"node": name})
+            elif kind == "on_chain_start" and name in {"retrieve_evidence", "draft_claims", "verify_claims"}:
                 yield _sse("progress", {"node": name})
             elif kind == "on_chat_model_end" and isinstance(output, AIMessage):
                 # Supervisor/SQL 的结构化输出属于内部控制, 不是用户工具调用。

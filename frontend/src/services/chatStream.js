@@ -1,5 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
+export async function getEvidence(evidenceId, token, asOf = "") {
+  const params = new URLSearchParams();
+  if (asOf) params.set("rag_as_of", asOf);
+  return readJson(await fetch(`${API_BASE}/api/rag/evidence/${encodeURIComponent(evidenceId)}?${params}`, {
+    headers: authHeaders(token),
+  }));
+}
+
 function parseSseBlock(block) {
   let event = "message";
   const dataLines = [];
@@ -73,6 +81,7 @@ export async function streamChat(question, handlers, signal, options = {}) {
       question,
       session_id: options.sessionId || null,
       user_id: options.userId || "default",
+      rag_as_of: options.ragAsOf || null,
     }),
     signal,
   });
@@ -120,6 +129,7 @@ export async function sendChat(question, signal, options = {}) {
       question,
       session_id: options.sessionId || null,
       user_id: options.userId || "default",
+      rag_as_of: options.ragAsOf || null,
     }),
     signal,
   });
