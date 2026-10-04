@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     chroma_host: str = Field(default="localhost")
     chroma_port: int = Field(default=8001)
     chroma_collection: str = Field(default="petrochat_specs")
+    rag_mode: Literal["vector", "hybrid", "hybrid_rerank"] = "hybrid_rerank"
+    rag_candidate_k: int = Field(default=30, ge=5, le=100)
+    rag_rerank_model: str = "gte-rerank-v2"
+    rag_rerank_url: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    rag_rerank_timeout_seconds: float = Field(default=10, gt=0, le=60)
 
     langsmith_tracing: bool = Field(default=False)
     langsmith_api_key: SecretStr = Field(default=SecretStr(""))

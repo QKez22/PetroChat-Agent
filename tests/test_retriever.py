@@ -31,9 +31,9 @@ def test_format_citation_basic() -> None:
         "source_doc": "2.《高桥石化备品配件管理细则》（2025年2月修订稿）",
         "section_number": "3.1.2",
     })
-    # 去掉了 "2." 前缀和"（...修订稿）"尾巴
+    # 去掉序号前缀，但保留版本身份。
     assert "2." not in cite
-    assert "修订稿" not in cite
+    assert "修订稿" in cite
     assert "3.1.2" in cite
     assert "高桥石化备品配件管理细则" in cite
 
@@ -136,6 +136,7 @@ def test_retriever_score_threshold(temp_collection_with_data: str) -> None:
     r = PetrochatRetriever(
         top_k=5,
         score_threshold=0.0001,  # 几乎不可能达到
+        mode="vector",
         collection_name=temp_collection_with_data,
     )
     docs = r.invoke("不相关的随机问题 quark gluon")

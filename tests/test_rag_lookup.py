@@ -15,7 +15,7 @@ def test_exact_lookup_never_embeds_and_keeps_all_chunks(monkeypatch):
         seen.append(where)
         return [SimpleNamespace(chunk_id=f"c{i}", content=f"part{i}", metadata={"source_doc": "policy", "section_number": "2.1"}) for i in range(8)]
     monkeypatch.setattr(lookup, "get_chunks", get)
-    monkeypatch.setattr(lookup, "_vector_query", lambda **kw: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(lookup, "make_retriever", lambda **kw: (_ for _ in ()).throw(AssertionError()))
     result = lookup.lookup_section.invoke({"source_doc_hint": "policy", "section_number": "2.1"})
     assert "part7" in result
     assert seen[0]["$and"][1] == {"source_doc": {"$in": ["policy"]}}
@@ -26,8 +26,8 @@ def test_document_filter_is_applied_before_topk(monkeypatch):
     seen = []
     def query(**kw):
         seen.append(kw)
-        return []
-    monkeypatch.setattr(lookup, "_vector_query", query)
+        return SimpleNamespace(invoke=lambda q: [])
+    monkeypatch.setattr(lookup, "make_retriever", query)
     lookup.search_within_doc.invoke({"query": "q", "source_doc_hint": "policy", "top_k": 5})
     assert seen[0]["where"] == {"source_doc": {"$in": ["policy"]}}
     assert seen[0]["top_k"] == 5

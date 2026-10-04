@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
-from ..rag import query as _vector_query
+from ..rag import make_retriever
 from ..rag.vector_store import get_chunks, resolve_sources
 
 
@@ -77,8 +77,8 @@ def search_within_doc(query: str, source_doc_hint: str, top_k: int = 5) -> str:
         sources = resolve_sources(source_doc_hint)
         if not sources:
             return "未找到指定规范文档。"
-        results = _vector_query(query_text=query, top_k=max(1, min(top_k, 30)),
-                                where={"source_doc": {"$in": sources}})
+        results = make_retriever(top_k=max(1, min(top_k, 30)),
+                                where={"source_doc": {"$in": sources}}).invoke(query)
     except Exception as e:
         return f"检索失败: {e}"
 
@@ -89,6 +89,6 @@ def search_within_doc(query: str, source_doc_hint: str, top_k: int = 5) -> str:
 
     return "\n\n---\n\n".join(
         f"[出自 {r.metadata.get('source_doc', '?')} 第 {r.metadata.get('section_number', '?')} 条]\n"
-        f"{r.content}"
-        for r in matched[:top_k]
+        f"{r.page_content}"
+        for r in matched[:max(1, min(top_k, 30))]
     )
