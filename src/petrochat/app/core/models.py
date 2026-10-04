@@ -93,6 +93,8 @@ class TurnResult(BaseModel):
 
     answer: str
     citations: list[str] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
+    rag_status: str = ""
     artifacts: list[ReportArtifact] = Field(default_factory=list)
     status: Literal["completed", "partial", "failed"] = "completed"
     tasks: list[dict] = Field(default_factory=list)

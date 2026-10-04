@@ -97,6 +97,7 @@ def wrap_worker(worker: str, function: Callable) -> Callable:
             failed = failed or not output.get("sql_result", {}).get("ok", False)
         elif worker == "qa":
             failed = failed or not output.get("retrieved")
+            failed = failed or output.get("rag_status", "answered") != "answered"
         elif worker == "general":
             failed = failed or any(
                 isinstance(m, ToolMessage)

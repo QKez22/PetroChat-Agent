@@ -45,6 +45,8 @@ def _merge(snapshot: dict, output: dict) -> dict:
         merged["messages"] = add_messages(snapshot.get("messages", []), output["messages"])
     if "artifacts" in output:
         merged["artifacts"] = [*snapshot.get("artifacts", []), *output["artifacts"]]
+    if "evidence" in output:
+        merged["evidence"] = [*snapshot.get("evidence", []), *output["evidence"]]
     return merged
 
 

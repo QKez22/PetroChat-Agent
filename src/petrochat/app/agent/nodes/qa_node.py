@@ -1,55 +1,38 @@
-"""QA 节点（纯 RAG，单步）—— 知识题专用。
-
-跟 phase 2 的 ReAct 不同：不让 LLM 选工具，直接 retriever → context → LLM。
-适用于 supervisor 已判定为"知识题"的场景。
-"""
+"""证据驱动 QA worker；未通过验证的模型草稿不进入消息流。"""
 
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from loguru import logger
+import re
 
-from ...core import AgentState, get_chat_llm
-from ...memory import augment_question_with_memory
-from ...rag import format_citations, make_retriever
-from ..prompts import QA_SYSTEM_PROMPT, format_context
+from langchain_core.messages import AIMessage
+
+from ...core import AgentState, get_settings
+from ...rag.evidence import build_evidence_graph, render_result
 
 
 def qa_node(state: AgentState) -> dict:
     question = state.get("question", "").strip()
-    if not question:
-        return {"messages": [AIMessage(content="请提供问题。")]}
-
-    retriever = make_retriever(top_k=5)
-    docs = retriever.invoke(question)
-    logger.info("qa_node 召回 {} 条", len(docs))
-    if not docs:
+    historical = re.search(r"历史|当时|那年|去年|前年|20\d{2}年|20\d{2}-\d", question)
+    if not question or (historical and not state.get("rag_as_of")):
         return {
-            "messages": [AIMessage(content="未检索到足够的规范证据，暂时无法完成该子任务。")],
-            "retrieved": [], "citations": [],
+            "messages": [
+                AIMessage(content="请补充问题及明确的规范适用日期（rag_as_of），避免混用历史版本。")
+            ],
+            "retrieved": [],
+            "citations": [],
+            "rag_status": "needs_clarification",
+            "evidence": [],
         }
-
-    context = format_context(docs)
-    long_term_context = state.get("long_term_context", "")
-    question_with_memory = augment_question_with_memory(question, long_term_context)
-    response = get_chat_llm().invoke([
-        SystemMessage(content=QA_SYSTEM_PROMPT),
-        HumanMessage(content=f"【参考资料】\n{context}\n\n【问题】\n{question_with_memory}"),
-    ])
-
-    return {
-        "messages": [response],
-        "retrieved": [
-            {
-                "chunk_id": d.metadata.get("chunk_id"),
-                "content": d.page_content,
-                "score": d.metadata.get("score"),
-                "metadata": {
-                    k: v for k, v in d.metadata.items()
-                    if k not in ("chunk_id", "score")
-                },
-            }
-            for d in docs
-        ],
-        "citations": format_citations(docs),
-    }
+    if state.get("rag_as_of") and not get_settings().rag_catalog_enabled:
+        return {
+            "messages": [AIMessage(content="版本策略尚未启用，无法核实指定日期的适用规范。")],
+            "retrieved": [],
+            "citations": [],
+            "rag_status": "needs_review",
+            "evidence": [],
+        }
+    result = render_result(
+        build_evidence_graph().invoke({"question": question}, {"recursion_limit": 12})
+    )
+    answer = result.pop("answer")
+    return {**result, "messages": [AIMessage(content=answer)]}

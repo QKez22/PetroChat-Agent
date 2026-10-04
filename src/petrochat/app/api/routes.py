@@ -176,6 +176,8 @@ async def chat(req: ChatRequest, user: CurrentUserDep) -> ChatResponse:
     return ChatResponse(
         answer=answer,
         citations=citations,
+        evidence=turn_result.evidence,
+        rag_status=turn_result.rag_status,
         artifacts=turn_result.artifacts,
         status=turn_result.status,
         tasks=turn_result.tasks,
@@ -310,6 +312,8 @@ async def _stream_events(req: ChatRequest, user: CurrentUserDep) -> AsyncGenerat
 
         meta: dict[str, Any] = {
             "citations": citations,
+            "evidence": turn_result.evidence,
+            "rag_status": turn_result.rag_status,
             "session_id": session_id,
             "short_term_count": len(prompt_context.history),
             "short_term_original_count": len(history),

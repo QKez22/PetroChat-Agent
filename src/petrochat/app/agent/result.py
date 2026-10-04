@@ -50,7 +50,9 @@ def build_turn_result(state: dict[str, Any]) -> TurnResult:
     completed = any(t["status"] == "completed" for t in tasks)
     return TurnResult(
         answer=answer,
-        citations=list(dict.fromkeys(CITATION_PATTERN.findall(answer))),
+        citations=list(dict.fromkeys([*[e["evidence_id"] for e in state.get("evidence", [])], *CITATION_PATTERN.findall(answer)])),
+        evidence=list({e["evidence_id"]: e for e in state.get("evidence", [])}.values()),
+        rag_status=state.get("rag_status", ""),
         artifacts=artifacts,
         status=("partial" if completed else "failed") if incomplete else "completed",
         tasks=[{k: v for k, v in task.items() if k != "message_start"} for task in tasks],

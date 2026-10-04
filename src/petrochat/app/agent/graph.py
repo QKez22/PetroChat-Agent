@@ -30,6 +30,10 @@ def _resolve_tools():
 
         try:
             tools = get_loaded_tools()
+            if s.rag_catalog_enabled:
+                # MCP 不继承请求级 ContextVar；受保护的 RAG 工具必须在本地执行。
+                protected = {"retrieve_specs", "lookup_section", "search_within_doc"}
+                tools = [t for t in tools if t.name not in protected] + [t for t in LOCAL_TOOLS if t.name in protected]
             logger.info("graph 使用 MCP 工具: {} 个", len(tools))
             return [*tools, read_report_page]
         except Exception as exc:
