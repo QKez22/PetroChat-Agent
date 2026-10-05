@@ -63,3 +63,14 @@
 真实 embedding/搜索、丢失索引对账修复、删除全部通过。仅删除本次测试记录和测试集合。
 同步 worker 增加可选 user_id 限定，隔离测试不消费任何现有用户任务。
 测试脚本适配 Chroma 0.6 集合名称返回类型，并在 Windows 清理前关闭 Mem0 SQLite history。
+
+## 阶段 4a：轻量版本管理
+
+- 使用既有 user_memory metadata_json 保存 scope/key/value/unit/revision/valid_from，事件保存 before/after（旧快照附 valid_to），无需新表。
+- `PUT /api/memory/preferences` 只修改登录用户的偏好；创建 expected_revision=0，更新需当前版本，冲突 HTTP 409。
+- 用户+作用域+键的确定性主键、MySQL 行锁与 revision 条件更新防止丢失更新；通用 PATCH 禁止绕过结构化版本接口。
+- 已删除/禁用的结构化偏好不允许自动复活；相同值不重复写事件。
+- 明确单句的默认吨位、回答详略可自动写入；项目/否定/多条件等歧义表达不自动覆盖，显式 API 可指定 scope。
+- 不把助手生成内容送作偏好抽取依据；普通新建/更新事件开始保存正文快照，过去缺失的历史无法补造。
+- 38 项相关测试通过，真实 MySQL revision 更新/旧版本拒绝及 Chroma 同步通过。
+- 这是当前值+版本审计，不是完整双时态模型；也不声称覆盖所有自然语言偏好。

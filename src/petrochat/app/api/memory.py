@@ -17,6 +17,23 @@ from .auth import CurrentUserDep
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
+from ..memory.preferences import Preference
+from ..memory.versions import PreferenceConflict, put_preference
+
+
+class PreferenceRequest(BaseModel):
+    preference: Preference
+    expected_revision: int = Field(ge=0)
+
+
+@router.put("/preferences", summary="显式更新本人偏好；revision=0 创建，旧版本冲突返回409")
+async def save_preference(req: PreferenceRequest, user: CurrentUserDep):
+    try:
+        return _to_memory_response(put_preference(get_long_term_memory_store(), user_id=user.user_id,
+            preference=req.preference, expected_revision=req.expected_revision, actor_id=user.user_id))
+    except PreferenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 class MemoryCreateRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=64)

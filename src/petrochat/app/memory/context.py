@@ -183,6 +183,15 @@ def write_memory_candidates(
 
     store = store or get_long_term_memory_store()
     try:
+        from .preferences import explicit_preference
+        from .versions import preference_id, put_preference
+        preference = explicit_preference(question)
+        if preference is not None:
+            current = store.get_memory(preference_id(user_id, preference))
+            revision = int(current.metadata.get("revision", 0)) if current else 0
+            item = put_preference(store, user_id=user_id, preference=preference,
+                expected_revision=revision, actor_id=user_id)
+            return [MemoryWriteResult(id=item.id, memory_type=item.memory_type, content=item.content)]
         existing = store.list_memories(user_id=user_id, status="active", limit=200)
     except Exception as exc:
         logger.warning("long-term memory pre-read failed: {}", exc)
@@ -336,10 +345,8 @@ def _memory_score(item: MemoryItem, question: str) -> float:
 
 
 def _memory_messages(question: str, answer: str) -> list[dict[str, str]]:
-    messages = [{"role": "user", "content": question}]
-    if answer.strip():
-        messages.append({"role": "assistant", "content": answer})
-    return messages
+    # Assistant text is not evidence of a user's durable preference.
+    return [{"role": "user", "content": question}]
 
 
 def _is_numeric_user(user_id: str) -> bool:

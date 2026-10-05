@@ -10,7 +10,7 @@ import json
 import random
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Literal
@@ -168,6 +168,7 @@ class LongTermMemoryStore:
                 actor_id=actor_id,
                 reason="create memory",
                 payload={
+                    "after": asdict(item),
                     "memory_type": item.memory_type,
                     "source": item.source,
                     "confidence": item.confidence,
@@ -279,6 +280,8 @@ class LongTermMemoryStore:
         current = self.get_memory(memory_id)
         if current is None:
             return None
+        if current.metadata.get("kind") == "structured_preference":
+            raise ValueError("Use the versioned preference endpoint to edit structured preferences")
         next_content = current.content if content is None else content.strip()
         if not next_content:
             raise ValueError("content is required")
@@ -317,7 +320,10 @@ class LongTermMemoryStore:
                 event_type="updated",
                 actor_id=actor_id,
                 reason=reason,
-                payload={"confidence": next_confidence},
+                payload={"before": asdict(current), "after": {
+                    **asdict(current), "content": next_content, "confidence": next_confidence,
+                    "metadata": next_metadata, "updated_at": now, "expires_at": next_expiry,
+                }},
             )
         item = self.get_memory(memory_id)
         if item is not None:

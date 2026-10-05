@@ -51,15 +51,28 @@ def main():
             assert worker.run_once(user_id=user_id)["succeeded"] == 1
             assert adapter.indexed_state(user_id, item.id) == []
             assert worker.reconcile(page_size=1, user_id=user_id)["repair"] == 0
+            from petrochat.app.memory.preferences import Preference
+            from petrochat.app.memory.versions import put_preference, PreferenceConflict
+            preference = Preference(key="query.default_tonnage", value="100000", unit="吨")
+            head = put_preference(store, user_id=user_id, preference=preference, expected_revision=0)
+            owned.append(head.id)
+            put_preference(store, user_id=user_id, preference=preference.model_copy(update={"value":"200000"}), expected_revision=1)
+            assert store.get_memory(head.id).metadata["revision"] == 2
+            try:
+                put_preference(store, user_id=user_id, preference=preference, expected_revision=1)
+                raise AssertionError("stale revision accepted")
+            except PreferenceConflict:
+                pass
+            assert worker.run_once(user_id=user_id)["succeeded"] == 1
             print(json.dumps({"mysql_crud": True, "chroma_search": True,
-                "idempotent": True, "update": True, "repair": True, "delete": True}))
+                "idempotent": True, "update": True, "repair": True, "delete": True, "revisions": True}))
         finally:
             # Verify exact ownership before physical removal. Never touch real tenants.
             with store.engine.begin() as conn:
                 for memory_id in owned:
                     source = conn.execute(text("SELECT source FROM user_memory WHERE id=:id AND user_id=:u"),
                         {"id": memory_id, "u": user_id}).scalar()
-                    assert source == "test:" + run
+                    assert source in {"test:" + run, "explicit_preference"}
                     for table in ("agent_memory_sync", "memory_event"):
                         conn.execute(text(f"DELETE FROM {table} WHERE memory_id=:id AND user_id=:u"), {"id": memory_id, "u": user_id})
                     conn.execute(text("DELETE FROM user_memory WHERE id=:id AND user_id=:u"), {"id": memory_id, "u": user_id})
