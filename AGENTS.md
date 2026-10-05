@@ -7,7 +7,7 @@
 
 # 技术栈（请严格遵守，不要擅自替换）
 - 语言：Python 3.12（部分代码用 `from datetime import timezone; UTC = timezone.utc` 兼容 3.10）
-- Agent 编排：LangGraph 1.x（**Supervisor 模式**，supervisor → {qa / sql / general}）
+- Agent 编排：LangGraph 1.x（**循环 Supervisor 模式**：supervisor → {qa / sql / general} → supervisor 回边评估 → … → FINISH）
 - LLM 应用框架：LangChain
 - Web 框架：FastAPI（SSE 流式 + JWT 鉴权）
 - 向量库：Chroma HTTP 服务（chromadb-client + Docker chromadb/chroma 镜像）
@@ -22,7 +22,7 @@
 # 项目结构（生成代码时按此归属）
 src 布局，`src/petrochat/app/` 下分包：
 - **api**：FastAPI 路由（chat SSE / sessions / memory / auth / admin / evaluation）
-- **agent**：LangGraph Supervisor StateGraph + 四节点（supervisor/qa/sql/general）+ tools 子图
+- **agent**：LangGraph 循环 Supervisor StateGraph + 五节点（supervisor/qa/sql/general/tools）。worker 执行完回 supervisor 评估是否继续分派（支持多意图任务），supervisor 决策 FINISH 结束循环；SUPERVISOR_MAX_STEPS=5 兜底防死循环
 - **rag**：文档解析 / 向量库 CRUD / 检索器
 - **sql**：NL2SQL 四件套（engine / generator / validator / executor）+ schema 抓取
 - **report**：DataFrame → Markdown 表 + matplotlib 图表（base64 PNG 侧信道）

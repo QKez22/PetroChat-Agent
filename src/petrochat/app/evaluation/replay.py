@@ -8,18 +8,18 @@ Two modes are supported:
 from __future__ import annotations
 
 import asyncio
-import csv
-import json
 import re
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage
-
 from petrochat.app.agent import build_graph, build_initial_state
+from petrochat.app.agent.result import build_turn_result
+from petrochat.app.agent.runtime import run_graph
+
+from ._io import loads_json, read_csv, write_json, write_jsonl
 
 Mode = Literal["oracle", "agent"]
 AgentRunner = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -27,45 +27,28 @@ AgentRunner = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(.*?)```", re.I | re.S)
 
 
-def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            count += 1
-    return count
-
-
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _loads_json(value: str, default: Any) -> Any:
-    if value is None or value == "":
-        return default
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return default
-
-
 def _index_by_key(rows: list[dict[str, str]]) -> dict[tuple[str, str], dict[str, str]]:
     return {(row["dialogue_id"], row["turn_id"]): row for row in rows}
 
 
 def _latest_answer(state: dict[str, Any]) -> str:
-    messages = state.get("messages") or []
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
-            return msg.content if isinstance(msg.content, str) else str(msg.content)
-    return ""
+    return build_turn_result(state).answer
+
+
+def _guess_route(state: dict[str, Any]) -> str:
+    """从 state 推断路由标签。
+
+    循环 supervisor FINISH 后 next="FINISH"，不反映实际经过的 worker，
+    按 state 里的产出（sql_result / retrieved）推断主路由。
+    """
+    nxt = state.get("next")
+    if nxt in {"qa", "sql", "general"}:
+        return str(nxt)
+    if state.get("sql_result"):
+        return "sql"
+    if state.get("retrieved"):
+        return "qa"
+    return "general"
 
 
 def _extract_sql(answer: str) -> str:
@@ -118,13 +101,13 @@ def _oracle_predictions(
     dialogue_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     turns = _filter_turns(
-        _read_csv(golden_dir / "golden_dialogue_turns.csv"),
+        read_csv(golden_dir / "golden_dialogue_turns.csv"),
         scenario_type=scenario_type,
         dialogue_ids=dialogue_ids,
     )
-    sql_by_key = _index_by_key(_read_csv(golden_dir / "golden_sql_expectation.csv"))
-    rag_by_key = _index_by_key(_read_csv(golden_dir / "golden_rag_evidence.csv"))
-    memory_by_key = _index_by_key(_read_csv(golden_dir / "golden_memory_state.csv"))
+    sql_by_key = _index_by_key(read_csv(golden_dir / "golden_sql_expectation.csv"))
+    rag_by_key = _index_by_key(read_csv(golden_dir / "golden_rag_evidence.csv"))
+    memory_by_key = _index_by_key(read_csv(golden_dir / "golden_memory_state.csv"))
 
     rows: list[dict[str, Any]] = []
     for turn in turns:
@@ -142,7 +125,7 @@ def _oracle_predictions(
             "scenario_type": turn.get("scenario_type"),
             "question": turn.get("user_message"),
             "route": "sql" if sql_row else "qa" if rag_row else "general",
-            "answer": "; ".join(_loads_json(turn.get("expected_answer_points", ""), [])),
+            "answer": "; ".join(loads_json(turn.get("expected_answer_points", ""), [])),
             "sql": sql_row.get("expected_sql_template", "") if sql_row else "",
             "retrieved": [
                 {
@@ -151,7 +134,7 @@ def _oracle_predictions(
                     "chunk_id": rag_row.get("expected_chunk_id"),
                 }
             ] if rag_row else [],
-            "memory_after": _loads_json(memory_row.get("memory_after", ""), {}) if memory_row else {},
+            "memory_after": loads_json(memory_row.get("memory_after", ""), {}) if memory_row else {},
             "status": "ok",
             "latency_ms": 0,
         })
@@ -160,7 +143,7 @@ def _oracle_predictions(
 
 async def _default_agent_runner(state: dict[str, Any]) -> dict[str, Any]:
     graph = build_graph()
-    return await graph.ainvoke(state)
+    return await run_graph(graph, state)
 
 
 async def _agent_predictions(
@@ -174,7 +157,7 @@ async def _agent_predictions(
     runner: AgentRunner | None = None,
 ) -> list[dict[str, Any]]:
     turns = _filter_turns(
-        _read_csv(golden_dir / "golden_dialogue_turns.csv"),
+        read_csv(golden_dir / "golden_dialogue_turns.csv"),
         scenario_type=scenario_type,
         dialogue_ids=dialogue_ids,
     )
@@ -199,11 +182,13 @@ async def _agent_predictions(
                 )
                 state = await runner(initial_state)
                 answer = _latest_answer(state)
-                status = "ok"
-                error = ""
-                route = state.get("next") or "general"
+                turn_result = build_turn_result(state)
+                status = "ok" if turn_result.status == "completed" else "error"
+                error = (turn_result.termination_reason or "存在未完成子任务") if status == "error" else ""
+                route = _guess_route(state)
                 retrieved = _retrieved_payload(state)
                 sql = _extract_sql(answer)
+                sql_result = state.get("sql_result") or {}
                 memory_used = [
                     item.get("id")
                     for item in state.get("long_term_memories", [])
@@ -216,6 +201,7 @@ async def _agent_predictions(
                 route = "error"
                 retrieved = []
                 sql = ""
+                sql_result = {}
                 memory_used = []
 
             latency_ms = int((time.perf_counter() - started_at) * 1000)
@@ -232,6 +218,15 @@ async def _agent_predictions(
                 "route": route,
                 "answer": answer,
                 "sql": sql,
+                "sql_stage": sql_result.get("stage"),
+                "sql_error": sql_result.get("error"),
+                "sql_pipeline_mode": sql_result.get("pipeline_mode"),
+                "sql_repair_attempted": sql_result.get("repair_attempted"),
+                "sql_repair_succeeded": sql_result.get("repair_succeeded"),
+                "sql_schema_table_count": sql_result.get("schema_table_count"),
+                "sql_schema_column_count": sql_result.get("schema_column_count"),
+                "sql_schema_total_column_count": sql_result.get("schema_total_column_count"),
+                "sql_schema_tables": sql_result.get("schema_tables"),
                 "retrieved": retrieved,
                 "memory_used": memory_used,
                 "status": status,
@@ -252,11 +247,30 @@ def _prediction_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     latencies = [int(row.get("latency_ms") or 0) for row in rows]
     routes: dict[str, int] = {}
     scenarios: dict[str, int] = {}
+    sql_modes: dict[str, int] = {}
+    schema_table_counts: list[int] = []
+    schema_column_counts: list[int] = []
+    schema_total_column_counts: list[int] = []
+    repair_attempted_count = 0
+    repair_succeeded_count = 0
     for row in rows:
         route = str(row.get("route") or "unknown")
         scenario = str(row.get("scenario_type") or "unknown")
         routes[route] = routes.get(route, 0) + 1
         scenarios[scenario] = scenarios.get(scenario, 0) + 1
+        mode = str(row.get("sql_pipeline_mode") or "unknown")
+        if mode != "unknown":
+            sql_modes[mode] = sql_modes.get(mode, 0) + 1
+        if row.get("sql_schema_table_count") is not None:
+            schema_table_counts.append(int(row.get("sql_schema_table_count") or 0))
+        if row.get("sql_schema_column_count") is not None:
+            schema_column_counts.append(int(row.get("sql_schema_column_count") or 0))
+        if row.get("sql_schema_total_column_count") is not None:
+            schema_total_column_counts.append(int(row.get("sql_schema_total_column_count") or 0))
+        if row.get("sql_repair_attempted"):
+            repair_attempted_count += 1
+        if row.get("sql_repair_succeeded"):
+            repair_succeeded_count += 1
     return {
         "prediction_count": count,
         "ok_count": ok_count,
@@ -266,6 +280,21 @@ def _prediction_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "max_latency_ms": max(latencies) if latencies else 0,
         "route_counts": routes,
         "scenario_counts": scenarios,
+        "sql_pipeline_mode_counts": sql_modes,
+        "avg_sql_schema_table_count": (
+            round(sum(schema_table_counts) / len(schema_table_counts), 2)
+            if schema_table_counts else 0
+        ),
+        "avg_sql_schema_column_count": (
+            round(sum(schema_column_counts) / len(schema_column_counts), 2)
+            if schema_column_counts else 0
+        ),
+        "avg_sql_schema_total_column_count": (
+            round(sum(schema_total_column_counts) / len(schema_total_column_counts), 2)
+            if schema_total_column_counts else 0
+        ),
+        "sql_repair_attempted_count": repair_attempted_count,
+        "sql_repair_succeeded_count": repair_succeeded_count,
     }
 
 
@@ -303,7 +332,7 @@ async def generate_predictions_async(
     else:
         raise ValueError(f"unsupported replay mode: {mode}")
 
-    count = _write_jsonl(output_path, rows)
+    count = write_jsonl(output_path, rows)
     summary = {
         "run_id": run_id,
         "mode": mode,
@@ -318,7 +347,7 @@ async def generate_predictions_async(
         "prediction_summary": _prediction_summary(rows),
     }
     if summary_path:
-        _write_json(summary_path, summary)
+        write_json(summary_path, summary)
     return summary
 
 

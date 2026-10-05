@@ -128,9 +128,10 @@ def query(
     Returns:
         按相似度排序的 RetrievedChunk 列表（score 越小越相关，cosine distance）。
     """
-    collection = get_or_create_collection(collection_name)
+    from .catalog import scoped_query
+    where, selected_collection = scoped_query(where, collection_name)
+    collection = get_client().get_collection(selected_collection or get_settings().chroma_collection)
     embedder = get_embedding()
-
     # 查询向量（注意 embed_query 跟 embed_documents 在某些模型上有不同 prompt prefix）
     query_emb = embedder.embed_query(query_text)
 
@@ -157,6 +158,30 @@ def query(
             ids_list, docs_list, metas_list, dists_list, strict=True
         )
     ]
+
+
+def get_chunks(where: dict | None = None, collection_name: str | None = None) -> list[RetrievedChunk]:
+    """分页按元数据读取原文，不调用 embedding、不创建集合。"""
+    from .catalog import scoped_query
+    where, collection_name = scoped_query(where, collection_name)
+    collection = get_client().get_collection(collection_name or get_settings().chroma_collection)
+    chunks, offset = [], 0
+    while True:
+        batch = collection.get(where=where, limit=500, offset=offset, include=["documents", "metadatas"])
+        chunks.extend(RetrievedChunk(chunk_id=cid, content=body or "", metadata=meta or {}, score=0)
+                      for cid, body, meta in zip(batch["ids"], batch["documents"], batch["metadatas"], strict=True))
+        if len(batch["ids"]) < 500:
+            return chunks
+        offset += 500
+
+
+def resolve_sources(hint: str, collection_name: str | None = None) -> list[str]:
+    """先解析文档名，随后把完整名称下推到检索条件中。"""
+    hint = hint.strip().casefold()
+    if not hint:
+        return []
+    return sorted({str(c.metadata.get("source_doc", "")) for c in get_chunks(collection_name=collection_name)
+                   if hint in str(c.metadata.get("source_doc", "")).casefold()})
 
 
 def delete_by_filter(

@@ -38,13 +38,19 @@ def main() -> None:
             logger.info("Would sync memory_id={} user_id={} type={}", item.id, item.user_id, item.memory_type)
         return
 
-    adapter = Mem0MemoryAdapter(enabled=True)
-    adapter.reset_index()
     if args.clear_candidates:
-        adapter.reset_candidate_index()
-    for item in memories:
-        adapter.sync_created(item)
-    logger.info("Mem0 active-index rebuild finished. synced={}", len(memories))
+        raise SystemExit("Candidate clearing is no longer part of index repair; use a separately reviewed retention operation.")
+    from petrochat.app.core import get_settings
+    from petrochat.app.memory.sync import MemorySyncWorker
+    if not get_settings().memory_sync_enabled or not get_settings().mem0_enabled:
+        raise SystemExit("Run migration 005 and enable MEMORY_SYNC_ENABLED / MEM0_ENABLED first.")
+    # Full paginated repair instead of reset + a possibly truncated replay.
+    worker = MemorySyncWorker(store, Mem0MemoryAdapter(enabled=True))
+    plan = worker.reconcile()
+    result = worker.run_once(limit=min(args.limit, 1000))
+    logger.info("Repair enqueued: {}; this batch: {}. Drain remaining jobs with sync_memory_index.py --watch", plan, result)
+    if result["failed"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

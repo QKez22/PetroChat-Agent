@@ -30,6 +30,7 @@ class MemoryCreateRequest(BaseModel):
 
 
 class MemoryUpdateRequest(BaseModel):
+    expires_at: str | None = Field(default=None, max_length=64)
     content: str | None = Field(default=None, min_length=1, max_length=1000)
     confidence: float | None = Field(default=None, ge=0, le=1)
     metadata: dict[str, Any] | None = None
@@ -221,6 +222,7 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest, user: CurrentU
             confidence=req.confidence,
             actor_id=_actor_id(req.actor_id, user),
             reason=req.reason,
+            **({"expires_at": req.expires_at} if "expires_at" in req.model_fields_set else {}),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

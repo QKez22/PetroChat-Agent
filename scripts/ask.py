@@ -21,17 +21,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from langchain_core.messages import AIMessage, ToolMessage  # noqa: E402
-
 from petrochat.app.agent import build_graph, build_initial_state  # noqa: E402
+from petrochat.app.agent.result import build_turn_result  # noqa: E402
+from petrochat.app.agent.runtime import run_graph, stream_graph_events  # noqa: E402
 from petrochat.app.core import get_settings, setup_langsmith  # noqa: E402
 
 
 def _extract_answer(state) -> str:
-    for m in reversed(state.get("messages") or []):
-        if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
-            return m.content if isinstance(m.content, str) else str(m.content)
-    return "(无答案)"
+    return build_turn_result(state).answer or "(无答案)"
 
 
 async def main_async(question: str, stream: bool) -> None:
@@ -48,22 +45,16 @@ async def main_async(question: str, stream: bool) -> None:
 
     if stream:
         print("─" * 60)
-        async for event in graph.astream(state):
-            for node_name, output in event.items():
-                msgs = output.get("messages") or []
-                for m in msgs:
-                    if isinstance(m, AIMessage):
-                        if getattr(m, "tool_calls", None):
-                            for tc in m.tool_calls:
-                                print(f"\n🔧 [agent] 调用工具 {tc['name']}({tc.get('args')})")
-                        elif m.content:
-                            print(f"\n💬 [agent] {m.content}")
-                    elif isinstance(m, ToolMessage):
-                        preview = (m.content if isinstance(m.content, str) else str(m.content))[:300]
-                        print(f"\n📦 [{m.name}] {preview}")
+        async for event in stream_graph_events(graph, state):
+            if event.get("event") == "on_chain_end" and not event.get("parent_ids"):
+                result = build_turn_result(event["data"]["output"])
+                print(result.answer)
+                print(f"状态: {result.status}; 调用: {result.usage}")
+            elif event.get("event") == "on_tool_start":
+                print(f"工具: {event.get('name')}")
         print("\n" + "─" * 60)
     else:
-        result = await graph.ainvoke(state)
+        result = await run_graph(graph, state)
         print("\n══════════ 答案 ══════════")
         print(_extract_answer(result))
         print()

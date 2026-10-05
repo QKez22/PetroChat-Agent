@@ -17,6 +17,8 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from pydantic import Field
 
+from ..core.config import get_settings
+from .vector_store import get_chunks
 from .vector_store import query as _vector_query
 
 
@@ -35,10 +37,11 @@ class PetrochatRetriever(BaseRetriever):
     """
 
     top_k: int = Field(default=5, description="返回前 K 条")
+    mode: str | None = None
     score_threshold: float | None = Field(
         default=None,
         description="cosine distance 阈值，越大保留越多。None 表示不过滤。"
-                    "经验：百炼 v3 的 cosine distance，相关条款通常 < 0.6。",
+        "经验：百炼 v3 的 cosine distance，相关条款通常 < 0.6。",
     )
     collection_name: str | None = Field(
         default=None,
@@ -55,9 +58,41 @@ class PetrochatRetriever(BaseRetriever):
         *,
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
+        mode = self.mode or get_settings().rag_mode
+        if mode not in {"vector", "hybrid", "hybrid_rerank", "adaptive_hybrid"}:
+            raise ValueError("unknown retrieval mode")
+        candidate_k = max(self.top_k, get_settings().rag_candidate_k)
+        if mode == "adaptive_hybrid":
+            from .adaptive import adaptive_search
+
+            corpus = [
+                Document(page_content=r.content, metadata={**r.metadata, "chunk_id": r.chunk_id})
+                for r in get_chunks(where=self.where_filter, collection_name=self.collection_name)
+            ]
+
+            def scoped_vector(question, k, source):
+                where = self.where_filter
+                if source:
+                    source_filter = {"source_doc": source}
+                    where = {"$and": [where, source_filter]} if where else source_filter
+                results = _vector_query(
+                    query_text=question, top_k=k, where=where, collection_name=self.collection_name
+                )
+                return [
+                    Document(
+                        page_content=r.content,
+                        metadata={**r.metadata, "chunk_id": r.chunk_id, "score": r.score},
+                    )
+                    for r in results
+                    if self.score_threshold is None or r.score <= self.score_threshold
+                ]
+
+            return adaptive_search(
+                query, corpus, scoped_vector, top_k=self.top_k, candidate_k=candidate_k
+            )
         retrieved = _vector_query(
             query_text=query,
-            top_k=self.top_k,
+            top_k=self.top_k if mode == "vector" else candidate_k,
             where=self.where_filter,
             collection_name=self.collection_name,
         )
@@ -65,7 +100,7 @@ class PetrochatRetriever(BaseRetriever):
         if self.score_threshold is not None:
             retrieved = [r for r in retrieved if r.score <= self.score_threshold]
 
-        return [
+        docs = [
             Document(
                 page_content=r.content,
                 metadata={
@@ -77,6 +112,18 @@ class PetrochatRetriever(BaseRetriever):
             )
             for r in retrieved
         ]
+        if mode == "vector":
+            return docs
+        from .hybrid import fuse, keyword_search, rerank
+
+        corpus = [
+            Document(page_content=r.content, metadata={**r.metadata, "chunk_id": r.chunk_id})
+            for r in get_chunks(where=self.where_filter, collection_name=self.collection_name)
+        ]
+        merged = fuse(docs, keyword_search(query, corpus, candidate_k), k=candidate_k)
+        return (
+            rerank(query, merged, self.top_k) if mode == "hybrid_rerank" else merged[: self.top_k]
+        )
 
 
 # ============================================================
@@ -100,8 +147,7 @@ def format_citation(metadata: dict[str, Any]) -> str:
     sec = metadata.get("section_number", "").strip()
     # 去前缀编号
     src_clean = _FILE_PREFIX_PAT.sub("", src).strip()
-    # 去掉常见的修订/版本尾巴让引用更干净（保留主标题）
-    src_clean = re.sub(r"（[^）]*(?:修订|版|稿)[^）]*）", "", src_clean).strip()
+    # 版本是证据身份的一部分，不得抹掉修订稿等标记。
     # 已经带《》就不再加，没有的话加上
     if not src_clean.startswith("《"):
         src_clean = f"《{src_clean}》"
@@ -125,6 +171,7 @@ def make_retriever(
     score_threshold: float | None = None,
     where: dict[str, Any] | None = None,
     collection: str | None = None,
+    mode: str | None = None,
 ) -> PetrochatRetriever:
     """检索器工厂，给常用配置一个短调用形式。"""
     return PetrochatRetriever(
@@ -132,4 +179,5 @@ def make_retriever(
         score_threshold=score_threshold,
         where_filter=where,
         collection_name=collection,
+        mode=mode,
     )

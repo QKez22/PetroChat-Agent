@@ -160,17 +160,6 @@ def _trace_hint(
         "searchUrl": "https://smith.langchain.com/",
         "note": "Use copyText filters in LangSmith to locate replay traces without exposing raw prompts.",
     }
-    session_id = f"eval-{dialogue_id}" if dialogue_id and dialogue_id != "-" else ""
-    query = f"session_id:{session_id}" if session_id else "session_id:eval-*"
-    if turn_id and turn_id != "-":
-        query = f"{query} turn_id:{turn_id}"
-    return {
-        "enabled": settings.langsmith_tracing,
-        "project": settings.langsmith_project,
-        "sessionId": session_id,
-        "query": query,
-        "note": "真实 agent 回放时，可在 LangSmith 中按 session_id / dialogue_id / turn_id 过滤定位。",
-    }
 
 
 def _clip(value: Any, limit: int = 96) -> str:

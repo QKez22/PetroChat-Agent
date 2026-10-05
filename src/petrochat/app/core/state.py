@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator import add
+from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -14,6 +16,7 @@ class AgentState(TypedDict, total=False):
     """LangGraph 节点间共享的状态对象。"""
 
     question: str
+    rag_as_of: date | None
     session_id: str
     user_id: str
     messages: Annotated[list[BaseMessage], add_messages]
@@ -24,7 +27,18 @@ class AgentState(TypedDict, total=False):
     retrieved: list[dict[str, Any]]
     answer: str
     citations: list[str]
+    evidence: Annotated[list[dict[str, Any]], add]
+    rag_status: str
+    artifacts: Annotated[list[dict[str, Any]], add]
+    sql_result: dict[str, Any]
     score: dict[str, Any]
     intent: str
     next: NextNode
     retry_count: int
+    supervisor_step: int
+    tasks: list[dict[str, Any]]
+    requirements: list[dict[str, Any]]
+    active_task_id: int
+    termination_reason: str
+    usage: dict[str, int]
+    model_stats: list[dict[str, Any]]

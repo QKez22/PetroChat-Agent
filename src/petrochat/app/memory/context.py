@@ -12,6 +12,7 @@ from loguru import logger
 from .long_term import LongTermMemoryStore, MemoryItem, get_long_term_memory_store
 from .mem0_adapter import Mem0SearchResult, get_mem0_memory_adapter
 from .policy import accept_mem0_candidate, build_recall_policy, should_extract_memory
+from .validity import is_effective
 
 _TOKEN_PAT = re.compile(r"[\u4e00-\u9fffA-Za-z0-9_]{2,}")
 
@@ -88,6 +89,7 @@ def recall_long_term_memories(
     if not _is_numeric_user(user_id):
         return [], ""
 
+    limit = max(1, min(limit, 50))
     store = store or get_long_term_memory_store()
     policy = build_recall_policy(question, route_hint=route_hint)
     memories: list[RecalledMemory] = []
@@ -195,7 +197,7 @@ def write_memory_candidates(
     if not candidates:
         return []
 
-    existing_contents = {_compact(item.content) for item in existing}
+    existing_contents = {_compact(item.content) for item in existing if is_effective(item)}
     written: list[MemoryWriteResult] = []
     for candidate in candidates:
         accepted = accept_mem0_candidate(
@@ -238,14 +240,26 @@ def _recall_from_mem0(
     store: LongTermMemoryStore,
 ) -> list[RecalledMemory]:
     results = get_mem0_memory_adapter().search(user_id=user_id, query=question, limit=max(limit * 2, limit))
+    try:
+        prefetched = {item.id: item for item in store.get_memories_for_recall(
+            user_id=user_id, memory_types=memory_types,
+            ids=[result.memory_id for result in results], limit=max(limit * 2, limit),
+        )}
+    except Exception as exc:
+        logger.warning("memory batch validation failed: {}", type(exc).__name__)
+        return []
     memories: list[RecalledMemory] = []
     seen: set[str] = set()
     for result in results:
         if result.memory_id in seen:
             continue
-        item = _validated_mysql_memory(result, user_id=user_id, memory_types=memory_types, store=store)
+        item = prefetched.get(result.memory_id)
         if item is None:
             continue
+        from ..core import get_settings
+        from .sync import fingerprint
+        if get_settings().memory_sync_enabled and result.metadata.get("petrochat_fingerprint") != fingerprint(item):
+            continue  # stale embedding must not select newly edited, unrelated content
         memories.append(
             RecalledMemory.from_item(
                 item,
@@ -274,7 +288,7 @@ def _validated_mysql_memory(
     except Exception as exc:
         logger.warning("memory id validation failed: {}", exc)
         return None
-    if item is None or item.status != "active":
+    if item is None or not is_effective(item):
         return None
     if item.user_id != user_id or item.memory_type not in memory_types:
         return None
@@ -292,17 +306,7 @@ def _merge_mysql_fallback(
 ) -> list[RecalledMemory]:
     existing_ids = {memory.memory_id for memory in memories}
     try:
-        items: list[MemoryItem] = []
-        per_type_limit = max(limit * 4, limit)
-        for memory_type in sorted(memory_types):
-            items.extend(
-                store.list_memories(
-                    user_id=user_id,
-                    status="active",
-                    memory_type=memory_type,
-                    limit=per_type_limit,
-                )
-            )
+        items = store.get_memories_for_recall(user_id=user_id, memory_types=memory_types, limit=200)
     except Exception as exc:
         logger.warning("MySQL memory fallback failed: {}", exc)
         return memories
@@ -314,11 +318,8 @@ def _merge_mysql_fallback(
         existing_ids.add(item.id)
         if len(memories) >= limit:
             break
-    return sorted(
-        memories,
-        key=lambda mem: (mem.score or 0.0, mem.updated_at, 1 if mem.recall_source == "mem0" else 0),
-        reverse=True,
-    )
+    # Preserve primary ranking; unrelated score scales must not be compared.
+    return memories
 
 
 def _rank_memories(items: list[MemoryItem], question: str) -> list[MemoryItem]:

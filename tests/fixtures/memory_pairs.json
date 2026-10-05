@@ -1,0 +1,10 @@
+[
+  {"old":"以后默认查询吨位为10万吨的任务","new":"以后默认查询吨位为20万吨的任务","duplicate":false,"category":"number"},
+  {"old":"以后默认只查询运行中的设备任务","new":"以后默认不查询运行中的设备任务","duplicate":false,"category":"negation"},
+  {"old":"项目A默认查询运行中的设备任务","new":"项目B默认查询运行中的设备任务","duplicate":false,"category":"scope"},
+  {"old":"默认筛选压力为10MPa的设备","new":"默认筛选压力为10kPa的设备","duplicate":false,"category":"unit"},
+  {"old":"Default to refinery-one active tasks.","new":"Default to refinery-one active tasks.","duplicate":true,"category":"exact"},
+  {"old":"默认查询 运行中 的任务","new":" 默认查询  运行中 的任务 ","duplicate":true,"category":"whitespace"},
+  {"old":"默认查询10万吨的任务","new":"常用吨位筛选条件为十万吨","duplicate":true,"category":"paraphrase"},
+  {"old":"请记住我更喜欢简洁的回答","new":"我的回答偏好是简明扼要","duplicate":true,"category":"paraphrase"}
+]

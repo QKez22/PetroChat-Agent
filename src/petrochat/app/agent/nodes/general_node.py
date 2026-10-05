@@ -16,6 +16,7 @@ from loguru import logger
 from ...core import AgentState, get_chat_llm, get_settings
 from ...tools import ALL_TOOLS as LOCAL_TOOLS
 from ..prompts import AGENT_SYSTEM_PROMPT
+from ...tools.report_page import compact_report_messages, read_report_page
 
 
 def _current_tools():
@@ -23,7 +24,7 @@ def _current_tools():
     if s.mcp_enabled:
         from ...mcp import get_loaded_tools
         try:
-            return get_loaded_tools()
+            return [*get_loaded_tools(), read_report_page]
         except Exception as exc:
             logger.warning("MCP 工具不可用，general 节点降级使用本地工具: {}", exc)
     return LOCAL_TOOLS
@@ -36,5 +37,5 @@ def general_node(state: AgentState) -> dict:
         messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT), *messages]
 
     llm_with_tools = get_chat_llm().bind_tools(_current_tools())
-    response = llm_with_tools.invoke(messages)
+    response = llm_with_tools.invoke(compact_report_messages(messages))
     return {"messages": [response]}

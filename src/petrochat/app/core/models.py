@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -72,15 +72,40 @@ class ChatRequest(BaseModel):
     """前端 → 后端的对话请求。"""
 
     question: str = Field(min_length=1, max_length=2000)
+    rag_as_of: date | None = Field(default=None, description="规范适用日期；历史查询须显式指定")
     session_id: str | None = Field(default=None, description="多轮会话 ID")
     user_id: str = Field(default="default", min_length=1, max_length=64)
 
 
-class ChatResponse(BaseModel):
-    """非流式接口的响应（流式接口用 SSE，不走这个）。"""
+class ReportArtifact(BaseModel):
+    """随本次请求交付的报表, 不进入模型消息正文。"""
+
+    title: str = ""
+    markdown: str
+    chart_data_uri: str | None = None
+    chart_kind: str = "none"
+    row_count: int
+    columns: list[str]
+
+
+class TurnResult(BaseModel):
+    """流式与非流式接口共享的最终结果。"""
 
     answer: str
     citations: list[str] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
+    rag_status: str = ""
+    artifacts: list[ReportArtifact] = Field(default_factory=list)
+    status: Literal["completed", "partial", "failed"] = "completed"
+    tasks: list[dict] = Field(default_factory=list)
+    usage: dict[str, int] = Field(default_factory=dict)
+    model_stats: list[dict] = Field(default_factory=list)
+    termination_reason: str = ""
+
+
+class ChatResponse(TurnResult):
+    """非流式接口的响应（流式接口用 SSE，不走这个）。"""
+
     score: ScoreResult | None = None
     session_id: str | None = None
     memory_used: list[str] = Field(default_factory=list)

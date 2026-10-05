@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from ._io import read_csv, write_json
 from .golden_set import evaluate_golden_set
 from .replay import AgentRunner, generate_predictions
 
@@ -48,8 +48,7 @@ def _read_turns(golden_dir: Path) -> list[dict[str, str]]:
     path = golden_dir / "golden_dialogue_turns.csv"
     if not path.exists():
         raise FileNotFoundError(f"missing Golden Set turns file: {path}")
-    with path.open("r", encoding="utf-8-sig", newline="") as file:
-        return list(csv.DictReader(file))
+    return read_csv(path)
 
 
 def _dialogue_sort_key(dialogue_id: str) -> tuple[int, str]:
@@ -127,11 +126,6 @@ def build_baseline_plan(
     }
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
 def render_baseline_report(
     plan: dict[str, Any],
     replay_summary: dict[str, Any] | None = None,
@@ -207,7 +201,7 @@ def write_baseline_artifacts(
     out_dir.mkdir(parents=True, exist_ok=True)
     plan_path = out_dir / "agent_baseline_plan.json"
     report_path = out_dir / "agent_baseline_report.md"
-    _write_json(plan_path, plan)
+    write_json(plan_path, plan)
     report_path.write_text(
         render_baseline_report(plan, replay_summary, evaluation_summary),
         encoding="utf-8",
@@ -218,7 +212,7 @@ def write_baseline_artifacts(
     }
     if replay_summary:
         summary_path = out_dir / "agent_baseline_summary.json"
-        _write_json(summary_path, replay_summary)
+        write_json(summary_path, replay_summary)
         outputs["summary"] = str(summary_path)
     return outputs
 

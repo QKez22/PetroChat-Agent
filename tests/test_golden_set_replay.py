@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -9,17 +8,10 @@ from langchain_core.messages import AIMessage
 from petrochat.app.evaluation import evaluate_golden_set, generate_predictions
 
 
-def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _make_minimal_golden(tmp_path: Path) -> Path:
+def _make_minimal_golden(tmp_path: Path, write_csv) -> Path:
     golden = tmp_path / "golden"
     golden.mkdir()
-    _write_csv(golden / "golden_dialogue_turns.csv", [
+    write_csv(golden / "golden_dialogue_turns.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -32,7 +24,7 @@ def _make_minimal_golden(tmp_path: Path) -> Path:
             "forbidden_behavior": "[]",
         }
     ])
-    _write_csv(golden / "golden_memory_state.csv", [
+    write_csv(golden / "golden_memory_state.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -44,7 +36,7 @@ def _make_minimal_golden(tmp_path: Path) -> Path:
             "requires_clarification": "False",
         }
     ])
-    _write_csv(golden / "golden_sql_expectation.csv", [
+    write_csv(golden / "golden_sql_expectation.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -59,7 +51,7 @@ def _make_minimal_golden(tmp_path: Path) -> Path:
             "forbidden_sql_operations": "[]",
         }
     ])
-    _write_csv(golden / "golden_rag_evidence.csv", [
+    write_csv(golden / "golden_rag_evidence.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -71,7 +63,7 @@ def _make_minimal_golden(tmp_path: Path) -> Path:
             "forbidden_points": "[]",
         }
     ])
-    _write_csv(golden / "golden_scoring_rubric.csv", [
+    write_csv(golden / "golden_scoring_rubric.csv", [
         {
             "dialogue_id": "d1",
             "turn_id": "1",
@@ -91,8 +83,8 @@ def _make_minimal_golden(tmp_path: Path) -> Path:
     return golden
 
 
-def test_oracle_replay_writes_predictions_and_evaluates(tmp_path: Path) -> None:
-    golden = _make_minimal_golden(tmp_path)
+def test_oracle_replay_writes_predictions_and_evaluates(tmp_path: Path, write_csv) -> None:
+    golden = _make_minimal_golden(tmp_path, write_csv)
     output = tmp_path / "predictions.jsonl"
 
     summary = generate_predictions(golden, output, mode="oracle")
@@ -111,8 +103,8 @@ def test_oracle_replay_writes_predictions_and_evaluates(tmp_path: Path) -> None:
     assert result["prediction_metrics"]["sql_table_recall"] == 1
 
 
-def test_agent_replay_uses_runner_and_writes_summary(tmp_path: Path) -> None:
-    golden = _make_minimal_golden(tmp_path)
+def test_agent_replay_uses_runner_and_writes_summary(tmp_path: Path, write_csv) -> None:
+    golden = _make_minimal_golden(tmp_path, write_csv)
     output = tmp_path / "agent_predictions.jsonl"
     summary_path = tmp_path / "agent_predictions.summary.json"
 

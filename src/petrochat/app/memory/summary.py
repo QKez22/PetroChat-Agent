@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
 from loguru import logger
 
 from ..core import get_settings
+from .constraints import active_constraints, constraints_text, stored_constraints
 from .store import ConversationStore, ConversationSummary, StoredMessage, get_conversation_store
 
 _FOLLOWUP_PAT = re.compile(r"(刚才|上面|上一轮|这个|那个|继续|再按|再查|它|这些|其中)")
@@ -103,23 +105,27 @@ def build_conversation_summary(
     max_chars: int,
 ) -> str:
     facts = _extract_summary_facts(messages)
+    slots = active_constraints([{"role": m.role, "content": m.content} for m in messages],
+                               initial=stored_constraints(previous_summary))
     sections = [
-        ("已确认事实", [*facts["constraints"], *facts["entities"], *facts["results"]], 5),
-        ("当前任务目标", facts["goals"], 3),
+        ("历史用户要求及实体（当前约束快照优先）", [*facts["constraints"], *facts["entities"]], 5),
+        ("历史回答（不是规范证据）", facts["results"], 5),
+        ("历史任务目标（不能覆盖当前要求）", facts["goals"], 3),
         ("用户偏好", facts["preferences"], 3),
         ("未解决问题", facts["open_items"], 3),
     ]
     lines: list[str] = []
     lines.append("【会话摘要】")
     if previous_summary.strip():
-        lines.extend(_clip_lines(previous_summary.splitlines(), max_lines=8))
+        lines.extend("[旧摘要未重新验收] " + line for line in _clip_lines(previous_summary.splitlines(), max_lines=8)
+                     if not line.startswith("CONSTRAINTS_V1="))
     for title, values, limit in sections:
         kept = _dedupe(values)[:limit]
         if not kept:
             continue
         lines.append(f"{title}:")
         lines.extend(f"- {item}" for item in kept)
-    return _prune_summary("\n".join(lines), max_chars=max(300, max_chars))
+    return "CONSTRAINTS_V1=" + json.dumps(slots, ensure_ascii=False) + "\n" + _prune_summary("\n".join(lines), max_chars=max(300, max_chars))
 
 
 def build_conversation_summary_message(summary: str) -> str:
@@ -157,8 +163,13 @@ def _extract_summary_facts(messages: list[StoredMessage]) -> dict[str, list[str]
             if _FOLLOWUP_PAT.search(text):
                 facts["open_items"].append(preview)
         else:
-            facts["results"].append(preview)
-        facts["entities"].extend(_important_entities(text))
+            status = getattr(msg, "status", "unknown")
+            if status == "completed":
+                facts["results"].append("[已完成回答] " + preview)
+            else:
+                facts["open_items"].append(f"[{status}; 不得视为已完成] " + preview)
+        if msg.role == "user":
+            facts["entities"].extend(_important_entities(text))
     return facts
 
 
@@ -176,7 +187,12 @@ def fit_prompt_context(
     """
 
     settings = get_settings()
-    summary = prune_text_to_tokens(conversation_summary, settings.conversation_summary_max_tokens)
+    protected = constraints_text(active_constraints(history, question, stored_constraints(conversation_summary)))
+    summary = prune_text_to_tokens("\n".join(line for line in conversation_summary.splitlines()
+                                            if not line.startswith("CONSTRAINTS_V1=")), settings.conversation_summary_max_tokens)
+    # 原始约束独立于可裁剪摘要; 每次重新计算, 避免旧部门条件覆盖新值。
+    if protected:
+        summary = protected + "\n" + summary
     memory_context = prune_text_to_tokens(long_term_context, max(settings.long_term_memory_limit, 1) * 180)
     kept_history = list(history)
     budget = _input_token_budget()
@@ -188,7 +204,7 @@ def fit_prompt_context(
         estimated = _estimate_prompt_tokens(question, kept_history, summary, memory_context)
     if estimated > budget and summary:
         remaining = max(200, budget - _estimate_prompt_tokens(question, kept_history, "", memory_context))
-        summary = prune_text_to_tokens(summary, remaining)
+        summary = protected if protected else prune_text_to_tokens(summary, remaining)
         estimated = _estimate_prompt_tokens(question, kept_history, summary, memory_context)
     return PromptContextBudgetResult(
         history=kept_history,

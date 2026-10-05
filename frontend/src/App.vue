@@ -1,5 +1,6 @@
 <script setup>
 import MarkdownIt from "markdown-it";
+import EvidenceCards from "./components/EvidenceCards.vue";
 import {
   Activity,
   BarChart3,
@@ -82,6 +83,7 @@ const SESSION_STORAGE_KEY = "petrochat.current.session";
 
 const messages = ref([]);
 const draft = ref("");
+const ragAsOf = ref("");
 const loginForm = ref({ username: "admin", password: "admin" });
 const loginError = ref("");
 const isLoggingIn = ref(false);
@@ -233,6 +235,13 @@ function traceHref(traceHint) {
 
 function traceLinkLabel(traceHint) {
   return traceHint?.traceUrl ? "打开 Trace" : "打开 LangSmith";
+}
+
+function messageCharts(message) {
+  const charts = (message.artifacts || [])
+    .filter((artifact) => artifact.chart_data_uri)
+    .map((artifact) => ({ uri: artifact.chart_data_uri, kind: artifact.chart_kind, rows: artifact.row_count }));
+  return charts.length ? charts : message.chart ? [message.chart] : [];
 }
 
 async function copyTraceText(text) {
@@ -701,6 +710,7 @@ function toChatMessage(record) {
       ...base,
       events: [],
       citations: extractCitations(record.content),
+      evidence: [...new Set([...record.content.matchAll(/\[(E-[0-9a-f]{16})\]/g)].map(match => match[1]))].map(id => ({ evidence_id: id, source_doc: "历史引用（展开后重新核验）", quotes: [] })),
       chart: null,
       status: "done",
     };
@@ -889,6 +899,8 @@ async function sendQuestion() {
     createdAt: new Date(),
     events: [],
     citations: [],
+    evidence: [],
+    ragAsOf: ragAsOf.value,
     chart: null,
     memoryUsed: [],
     memoryWritten: [],
@@ -906,19 +918,33 @@ async function sendQuestion() {
           assistant.content += data.text || "";
           scrollToBottom();
         },
+        result(data) {
+          assistant.content = data.answer || "";
+          assistant.evidence = data.evidence || [];
+          assistant.citations = data.citations || [];
+          assistant.artifacts = data.artifacts || [];
+          assistant.taskStatus = data.status || "completed";
+          scrollToBottom();
+        },
         tool_call(data) {
           appendToolEvent("call", data);
+        },
+        progress(data) {
+          const labels = { retrieve_evidence: "检索与条款补全", draft_claims: "生成带依据的结论", verify_claims: "校验引用与结论支撑" };
+          if (labels[data.node]) appendToolEvent("progress", { name: labels[data.node] });
         },
         tool_result(data) {
           appendToolEvent("result", data);
         },
         meta(data) {
+          assistant.evidence = data.evidence || assistant.evidence || [];
           if (data.session_id) {
             setCurrentSession(data.session_id);
           }
           assistant.citations = data.citations || [];
           assistant.memoryUsed = data.long_term_memory_ids || [];
           assistant.memoryWritten = data.memory_written_ids || [];
+          assistant.artifacts = data.artifacts || assistant.artifacts || [];
           if (data.chart_data_uri) {
             assistant.chart = {
               uri: data.chart_data_uri,
@@ -932,23 +958,27 @@ async function sendQuestion() {
         },
       },
       controller.signal,
-      { sessionId: currentSessionId.value, userId: currentUser.value.user_id, token: localToken.value },
+      { sessionId: currentSessionId.value, userId: currentUser.value.user_id, token: localToken.value, ragAsOf: assistant.ragAsOf },
     );
 
     if (!assistant.content.trim()) {
       const fallback = await sendChat(question, controller.signal, {
+        ragAsOf: assistant.ragAsOf,
         sessionId: currentSessionId.value,
         userId: currentUser.value.user_id,
         token: localToken.value,
       });
       setCurrentSession(fallback.session_id);
       assistant.content = fallback.answer || "";
+      assistant.evidence = fallback.evidence || [];
+      assistant.artifacts = fallback.artifacts || [];
+      assistant.taskStatus = fallback.status || "completed";
       assistant.citations = assistant.citations.length ? assistant.citations : fallback.citations || [];
       assistant.memoryUsed = fallback.memory_used || [];
       assistant.memoryWritten = fallback.memory_written || [];
     }
 
-    assistant.status = "done";
+    assistant.status = assistant.taskStatus && assistant.taskStatus !== "completed" ? "partial" : "done";
   } catch (error) {
     assistant.status = "error";
     assistant.content = error.name === "AbortError" ? "已停止生成。" : `请求失败：${error.message}`;
@@ -1194,6 +1224,7 @@ onMounted(async () => {
                 生成中
               </span>
               <span v-if="message.status === 'error'" class="error-label">错误</span>
+              <span v-if="message.status === 'partial'" class="error-label">任务未全部完成</span>
             </div>
 
             <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.content)"></div>
@@ -1203,24 +1234,25 @@ onMounted(async () => {
               <div v-for="event in message.events" :key="event.id" class="tool-event">
                 <Wrench :size="15" />
                 <div>
-                  <strong>{{ event.kind === "call" ? "调用" : "结果" }} {{ event.name }}</strong>
+                  <strong>{{ event.kind === "call" ? "调用" : event.kind === "progress" ? "阶段" : "结果" }} {{ event.name }}</strong>
                   <pre v-if="event.args">{{ JSON.stringify(event.args, null, 2) }}</pre>
                   <p v-if="event.preview">{{ event.preview }}</p>
                 </div>
               </div>
             </div>
 
-            <figure v-if="message.chart" class="chart-panel">
+            <figure v-for="(chart, chartIndex) in messageCharts(message)" :key="chartIndex" class="chart-panel">
               <figcaption>
                 <BarChart3 :size="16" />
-                {{ message.chart.kind }} / {{ message.chart.rows }} 行
+                {{ chart.kind }} / {{ chart.rows }} 行
               </figcaption>
-              <img :src="message.chart.uri" alt="查询结果图表" />
+              <img :src="chart.uri" alt="查询结果图表" />
             </figure>
 
             <div v-if="message.citations?.length" class="citations">
               <span v-for="citation in message.citations" :key="citation">[{{ citation }}]</span>
             </div>
+            <EvidenceCards :evidence="message.evidence || []" :token="localToken" :as-of="message.ragAsOf || ''" />
 
             <div v-if="message.memoryUsed?.length || message.memoryWritten?.length" class="memory-badges">
               <span v-for="id in message.memoryUsed" :key="`used-${id}`">使用 memory:{{ id }}</span>
@@ -1231,6 +1263,7 @@ onMounted(async () => {
       </div>
 
       <form v-if="activeView === 'chat'" class="composer" @submit.prevent="sendQuestion">
+        <label>规范适用日期（历史查询必填） <input v-model="ragAsOf" type="date" :disabled="isStreaming" /></label>
         <textarea
           v-model="draft"
           rows="3"

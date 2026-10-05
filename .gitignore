@@ -64,6 +64,7 @@ desktop.ini
 # ============== 项目专属 ==============
 # 环境变量（含 API Key，绝不提交）
 .env
+data/mem0_history.db
 .env.local
 .env.*.local
 

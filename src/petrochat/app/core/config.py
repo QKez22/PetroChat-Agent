@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,16 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
+    agent_model_call_limit: int = Field(default=12, ge=1, le=100)
+    agent_tool_call_limit: int = Field(default=8, ge=1, le=100)
+    agent_tool_repeat_limit: int = Field(default=2, ge=1, le=10)
+    agent_timeout_seconds: float = Field(default=180, gt=0, le=1800)
+    agent_tool_timeout_seconds: float = Field(default=30, gt=0, le=300)
+    agent_model_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    agent_recursion_limit: int = Field(default=64, ge=4, le=500)
+    # 只有业务确认后才配置；禁止把名称含 ITPM 擅自当成策略归属。
+    sql_strategy_field: str = ""
+    sql_strategy_values: dict[str, str] = Field(default_factory=dict)
 
     deepseek_api_key: SecretStr = Field(default=SecretStr(""))
     deepseek_base_url: str = Field(default="https://api.deepseek.com/v1")
@@ -38,6 +49,12 @@ class Settings(BaseSettings):
     chroma_host: str = Field(default="localhost")
     chroma_port: int = Field(default=8001)
     chroma_collection: str = Field(default="petrochat_specs")
+    rag_mode: Literal["vector", "hybrid", "hybrid_rerank", "adaptive_hybrid"] = "vector"
+    rag_catalog_enabled: bool = False
+    rag_candidate_k: int = Field(default=30, ge=5, le=100)
+    rag_rerank_model: str = "gte-rerank-v2"
+    rag_rerank_url: str = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    rag_rerank_timeout_seconds: float = Field(default=10, gt=0, le=60)
 
     langsmith_tracing: bool = Field(default=False)
     langsmith_api_key: SecretStr = Field(default=SecretStr(""))
@@ -57,6 +74,10 @@ class Settings(BaseSettings):
     mysql_password: SecretStr = Field(default=SecretStr(""))
     sql_default_limit: int = Field(default=1000)
     sql_timeout_seconds: int = Field(default=10)
+    sql_pipeline_mode: Literal["legacy", "optimized"] = Field(default="legacy")
+    sql_schema_narrowing_max_tables: int = Field(default=2)
+    sql_schema_narrowing_max_columns_per_table: int = Field(default=18)
+    sql_repair_max_attempts: int = Field(default=1)
     mysql_tables_whitelist: str = Field(default="affair,affair_task")
     mysql_enum_sample_threshold: int = Field(default=30)
     mysql_app_user: str = Field(default="")
@@ -85,6 +106,7 @@ class Settings(BaseSettings):
     context_system_token_budget: int = Field(default=2000)
     long_term_memory_limit: int = Field(default=5)
     mem0_enabled: bool = Field(default=False)
+    memory_sync_enabled: bool = Field(default=False)
     mem0_chroma_collection: str = Field(default="petrochat_memories")
     mem0_candidate_chroma_collection: str = Field(default="petrochat_memory_candidates")
     mem0_history_db_path: Path = Field(default=PROJECT_ROOT / "data" / "mem0_history.db")

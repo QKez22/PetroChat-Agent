@@ -6,33 +6,38 @@ from functools import lru_cache
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
+from .budget import BudgetCallback
 from .config import get_settings
+from .context import ContextChatOpenAI
 
 
 @lru_cache(maxsize=1)
 def get_chat_llm() -> ChatOpenAI:
     """DeepSeek chat（用于 RAG 答案生成）。streaming=True 让 invoke 内部也走流式 API，token chunks 通过 LangChain callback 冒泡。"""
     s = get_settings()
-    return ChatOpenAI(
+    return ContextChatOpenAI(
         model=s.deepseek_chat_model,
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,
         temperature=0.3,
-        timeout=60,
-        max_retries=2,
+        timeout=s.agent_model_timeout_seconds,
+        max_retries=0,
+        callbacks=[BudgetCallback()],
         streaming=True,
+        stream_usage=True,
     )
 
 
 @lru_cache(maxsize=1)
 def get_reasoner_llm() -> ChatOpenAI:
     s = get_settings()
-    return ChatOpenAI(
+    return ContextChatOpenAI(
         model=s.deepseek_reasoner_model,
         api_key=s.deepseek_api_key,
         base_url=s.deepseek_base_url,
-        timeout=120,
-        max_retries=2,
+        timeout=s.agent_model_timeout_seconds,
+        max_retries=0,
+        callbacks=[BudgetCallback()],
     )
 
 
@@ -47,4 +52,6 @@ def get_embedding() -> OpenAIEmbeddings:
         dimensions=s.embedding_dim,
         chunk_size=s.embedding_batch_size,
         check_embedding_ctx_length=False,
+        request_timeout=s.agent_model_timeout_seconds,
+        max_retries=0,
     )

@@ -6,7 +6,6 @@ import pandas as pd
 
 from petrochat.app.report import (
     df_to_markdown,
-    pop_last_report,
     render_chart,
     render_report,
     suggest_chart_type,
@@ -115,10 +114,10 @@ def test_render_report_full_pipeline() -> None:
     assert rep.chart_data_uri is not None
 
 
-def test_pop_last_report_clears_state() -> None:
-    df = pd.DataFrame({"x": [1, 2]})
-    render_report(df, with_chart=False)
-    r1 = pop_last_report()
-    r2 = pop_last_report()
-    assert r1 is not None
-    assert r2 is None  # pop 后清空
+def test_reports_are_independent() -> None:
+    first = render_report(pd.DataFrame({"x": [1, 2]}), title="first", with_chart=False)
+    second = render_report(pd.DataFrame({"y": [3]}), title="second", with_chart=False)
+    assert first.to_artifact()["row_count"] == 2
+    assert second.to_artifact()["row_count"] == 1
+    assert first.columns == ["x"]
+    assert second.columns == ["y"]
