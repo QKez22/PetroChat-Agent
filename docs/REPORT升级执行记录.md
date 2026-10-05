@@ -51,3 +51,10 @@
 只授予这五张表 CRUD，不授予全库、DDL 或业务表写权限。已存在同名表不会被删除/覆盖。
 真实 MySQL checkpoint 恢复验证尚未完成，阶段 3–7 尚未执行，不启用报表 Agent 功能。
 阶段 2 基础代码合入前：全量 292 项通过，F/I 静态检查通过；3 项既有 jieba 警告。
+# 阶段 2 补充：迁移与任务仓储验证（2026-10-06）
+
+- 007 已执行，真实应用账号验证五表读写及 checkpoint/pending writes 往返通过。
+- 新增隔离验证脚本 `scripts/verify_report_mysql.py`，只清理本次 UUID，不领取真实任务。
+- 任务/审计同事务，乐观 revision，用户隔离，300 秒租约，最多 3 次失败尝试；检查点写入同事务校验租约，阻止旧 worker 覆盖。
+- `tests/test_report_store.py` + persistence：7 passed。尚未启用业务工作流。
+
