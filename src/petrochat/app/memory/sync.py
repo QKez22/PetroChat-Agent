@@ -49,15 +49,17 @@ class MemorySyncWorker:
         self.store, self.adapter, self.clock = store, adapter, clock
         self.lease_seconds = lease_seconds
 
-    def run_once(self, limit: int = 100) -> dict[str, int]:
+    def run_once(self, limit: int = 100, *, user_id: str | None = None) -> dict[str, int]:
         if not self.adapter.enabled:
             raise RuntimeError("MEM0_ENABLED is required for the sync worker")
         counts = {"succeeded": 0, "failed": 0, "superseded": 0}
         now = self.clock()
         with self.store.engine.connect() as conn:
-            candidates = conn.execute(select(jobs).where(jobs.c.pending == 1,
+            query = select(jobs).where(jobs.c.pending == 1,
                 jobs.c.due_at <= now, jobs.c.lease_until <= now).order_by(jobs.c.due_at, jobs.c.memory_id)
-                .limit(max(1, min(limit, 1000)))).mappings().all()
+            if user_id is not None:
+                query = query.where(jobs.c.user_id == int(user_id))
+            candidates = conn.execute(query.limit(max(1, min(limit, 1000)))).mappings().all()
         for row in candidates:
             token = uuid.uuid4().hex
             with self.store.engine.begin() as conn:
@@ -88,14 +90,15 @@ class MemorySyncWorker:
             counts["failed" if error else "superseded" if newer else "succeeded"] += 1
         return counts
 
-    def reconcile(self, page_size: int = 200, *, dry_run: bool = False) -> dict[str, int]:
+    def reconcile(self, page_size: int = 200, *, dry_run: bool = False, user_id: str | None = None) -> dict[str, int]:
         """Keyset scan of ALL MySQL rows; never infer absence from a LIMIT slice."""
         counts = {"scanned": 0, "repair": 0, "orphan": 0}
         after = 0
         while True:
             with self.store.engine.connect() as conn:
-                rows = conn.execute(text("SELECT * FROM user_memory WHERE id > :after ORDER BY id LIMIT :size"),
-                    {"after": after, "size": max(1, min(page_size, 1000))}).mappings().all()
+                scope = "AND user_id = :user_id" if user_id is not None else ""
+                rows = conn.execute(text(f"SELECT * FROM user_memory WHERE id > :after {scope} ORDER BY id LIMIT :size"),
+                    {"after": after, "size": max(1, min(page_size, 1000)), "user_id": user_id}).mappings().all()
             if not rows:
                 break
             for row in rows:
@@ -110,12 +113,14 @@ class MemorySyncWorker:
                             enqueue(conn, item.id, item.user_id)
             after = rows[-1]["id"]
         # Only explicitly owned rows are eligible. No index mutation during pagination.
-        for user_id, memory_id in self.adapter.iter_index_keys(page_size=page_size):
+        for index_user_id, memory_id in self.adapter.iter_index_keys(page_size=page_size):
+            if user_id is not None and index_user_id != user_id:
+                continue
             item = self.store.get_memory(memory_id)
-            if item is None or item.user_id != user_id:
+            if item is None or item.user_id != index_user_id:
                 counts["orphan"] += 1
                 if not dry_run:
                     # Mismatched tenant metadata is removed by repairing that index key,
                     # never by writing the other user's MySQL row.
-                    self.adapter.remove_index_key(user_id, memory_id)
+                    self.adapter.remove_index_key(index_user_id, memory_id)
         return counts

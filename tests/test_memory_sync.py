@@ -143,3 +143,14 @@ def test_projection_upsert_is_idempotent_and_removes_legacy_duplicates(setup, mo
     store.delete_memory(item.id)
     adapter.sync_current(store.get_memory(item.id), user_id="1", memory_id=item.id)
     assert collection.rows == {}
+
+
+def test_tenant_scoped_worker_leaves_other_jobs_untouched(setup):
+    store, index = setup
+    one = store.create_memory(user_id="1", memory_type="preference", content="Preference one")
+    two = store.create_memory(user_id="2", memory_type="preference", content="Preference two")
+    worker = MemorySyncWorker(store, index)
+    assert worker.run_once(user_id="1")["succeeded"] == 1
+    assert index.indexed_state("1", one.id)
+    assert index.indexed_state("2", two.id) == []
+    assert worker.reconcile(user_id="1") == {"scanned": 1, "repair": 0, "orphan": 0}

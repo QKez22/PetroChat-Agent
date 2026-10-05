@@ -57,3 +57,9 @@
 因此真实记忆写入、事务 outbox、MySQL/Chroma 联调仍被阻塞；未开启新同步功能，也未操作业务数据。
 补充 `006_memory_governance_grants.sql`，只授权上述两张旧应用记忆表的 CRUD，不授予全库或业务表写权限。
 执行后继续验证实际 INSERT/事务回滚和隔离数据同步，再进入阶段 4/5。
+
+006 执行后复核通过：三表 SELECT/UPDATE/DELETE 授权有效；`check_memory_live.py --execute`
+在真实 MySQL、独立随机租户与 Chroma 测试集合上验证创建（INSERT）、更新、幂等重复执行、
+真实 embedding/搜索、丢失索引对账修复、删除全部通过。仅删除本次测试记录和测试集合。
+同步 worker 增加可选 user_id 限定，隔离测试不消费任何现有用户任务。
+测试脚本适配 Chroma 0.6 集合名称返回类型，并在 Windows 清理前关闭 Mem0 SQLite history。
