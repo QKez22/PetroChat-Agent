@@ -3,7 +3,12 @@ import pytest
 from pydantic import ValidationError
 
 from petrochat.app.report import render_report
-from petrochat.app.report.contracts import ReportDecision, ReportRequest, ReportStatus, validate_transition
+from petrochat.app.report.contracts import (
+    ReportDecision,
+    ReportRequest,
+    ReportStatus,
+    validate_transition,
+)
 
 
 def test_existing_report_baseline_is_deterministic_and_not_truncated_as_total():

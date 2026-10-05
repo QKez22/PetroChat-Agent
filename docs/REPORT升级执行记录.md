@@ -27,3 +27,27 @@
 
 新增独立请求、决策、产物引用契约及状态转换约束。未开放路由，未启动后台任务。
 基线使用固定部门任务数据验证现有 Markdown 报表、行数与截断提示；既有 render_report 保持不变。
+17 项相关测试通过，提交 `2aecab7` 已推送。
+
+## 阶段 2：checkpoint 基础（待 MySQL 迁移验收）
+
+在锁定版本的 BaseCheckpointSaver 协议上实现报表专用同步适配，复用 SQLAlchemy/MySQL，不增加数据库服务。
+保存完整小型 checkpoint、父 ID、metadata、pending writes；普通写入去重、错误/中断写入可替换。
+运行时不建表，限制单个序列化值 4 MiB、拒绝 pickle；限定普通 channel 的串行报表图，不宣称通用 saver/异步/跨版本迁移兼容。
+适配器本身不是鉴权层；后续 API 必须先校验任务归属，再由服务端映射 thread_id。
+
+验证：21 项通过，包含现有报表基线、状态机、文件 SQLite 重建连接、全新 Python 子进程恢复 interrupt、已完成查询不重跑、pending writes、历史列表/筛选与精确线程删除。
+测试图的查询是确定性夹具，不是已完成真实报表业务链路；尚未接入线上 API/worker。
+
+管理员下一步执行 `scripts/migrations/007_report_workflow.sql`，一次创建并授权：
+
+- agent_report_task：任务归属、版本、状态、租约；
+- agent_report_event：审批与状态审计；
+- agent_report_artifact：数据快照/图表/导出文件引用与校验；
+- agent_report_checkpoint：图执行状态；
+- agent_report_write：节点未完成写入。
+
+2026-10-05 只读预检这五张表均返回 1142（应用账号不可访问，不能据此区分缺表和缺权限）。
+只授予这五张表 CRUD，不授予全库、DDL 或业务表写权限。已存在同名表不会被删除/覆盖。
+真实 MySQL checkpoint 恢复验证尚未完成，阶段 3–7 尚未执行，不启用报表 Agent 功能。
+阶段 2 基础代码合入前：全量 292 项通过，F/I 静态检查通过；3 项既有 jieba 警告。

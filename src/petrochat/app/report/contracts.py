@@ -1,4 +1,5 @@
 """Durable report v1 contracts, separate from conversational AgentState."""
+
 from enum import StrEnum
 from typing import Literal
 
@@ -19,10 +20,21 @@ class ReportStatus(StrEnum):
 
 
 TRANSITIONS: dict[ReportStatus, frozenset[ReportStatus]] = {
-    ReportStatus.QUEUED: frozenset({ReportStatus.RUNNING, ReportStatus.PAUSED, ReportStatus.CANCELLED}),
-    ReportStatus.RUNNING: frozenset({ReportStatus.AWAITING_INPUT, ReportStatus.PAUSE_REQUESTED,
-        ReportStatus.FAILED, ReportStatus.COMPLETED, ReportStatus.CANCELLED}),
-    ReportStatus.PAUSE_REQUESTED: frozenset({ReportStatus.PAUSED, ReportStatus.FAILED, ReportStatus.CANCELLED}),
+    ReportStatus.QUEUED: frozenset(
+        {ReportStatus.RUNNING, ReportStatus.PAUSED, ReportStatus.CANCELLED}
+    ),
+    ReportStatus.RUNNING: frozenset(
+        {
+            ReportStatus.AWAITING_INPUT,
+            ReportStatus.PAUSE_REQUESTED,
+            ReportStatus.FAILED,
+            ReportStatus.COMPLETED,
+            ReportStatus.CANCELLED,
+        }
+    ),
+    ReportStatus.PAUSE_REQUESTED: frozenset(
+        {ReportStatus.PAUSED, ReportStatus.FAILED, ReportStatus.CANCELLED}
+    ),
     ReportStatus.AWAITING_INPUT: frozenset({ReportStatus.QUEUED, ReportStatus.CANCELLED}),
     ReportStatus.PAUSED: frozenset({ReportStatus.QUEUED, ReportStatus.CANCELLED}),
     ReportStatus.FAILED: frozenset({ReportStatus.QUEUED, ReportStatus.CANCELLED}),
