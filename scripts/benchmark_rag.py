@@ -17,7 +17,7 @@ def main():
     p.add_argument("--output", type=Path, default=Path("data/runtime/rag/vector_baseline.json"))
     p.add_argument("--collection")
     p.add_argument(
-        "--mode", choices=["vector", "bm25", "hybrid", "hybrid_rerank"], default="vector"
+        "--mode", choices=["vector", "bm25", "hybrid", "hybrid_rerank", "adaptive_hybrid"], default="vector"
     )
     p.add_argument("--backend", choices=["chroma", "snapshot"], default="chroma")
     args = p.parse_args()
@@ -39,6 +39,9 @@ def main():
         ]
 
         def retrieve(question):
+            if args.mode == "adaptive_hybrid":
+                from petrochat.app.rag.adaptive import adaptive_search
+                return adaptive_search(question, documents, lambda q, k, source: retriever.invoke(q, k, source))
             if args.mode == "vector":
                 return retriever.invoke(question)
             lexical = keyword_search(question, documents, 30)

@@ -19,10 +19,12 @@ def benchmark(cases, retrieve, *, mode: str, snapshot_id: str) -> dict:
         ranks = [ids.index(cid) + 1 for cid in expected.intersection(ids)]
         rows.append({"id": case["id"], "retrieved_ids": ids, "latency_ms": round(latency, 2),
                      "rerank_fallback": any(str(d.metadata.get("rerank_status", "")).startswith("fallback:") for d in docs),
+                     "rerank_skipped": bool(docs) and all(d.metadata.get("rerank_status") == "skipped:agreement" for d in docs),
                      "recall_at_5": len(hits) / len(expected), "complete": expected <= set(ids[:5]),
                      "rr": 1 / min(ranks) if ranks else 0})
     return {"mode": mode, "snapshot_id": snapshot_id, "case_count": len(rows),
             "rerank_fallback_count": sum(r["rerank_fallback"] for r in rows),
+            "rerank_skipped_count": sum(r["rerank_skipped"] for r in rows),
             "recall_at_5": mean(r["recall_at_5"] for r in rows) if rows else None,
             "complete_evidence_rate": mean(r["complete"] for r in rows) if rows else None,
             "mrr": mean(r["rr"] for r in rows) if rows else None,

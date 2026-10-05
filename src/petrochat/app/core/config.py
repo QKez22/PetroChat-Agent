@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     chroma_host: str = Field(default="localhost")
     chroma_port: int = Field(default=8001)
     chroma_collection: str = Field(default="petrochat_specs")
-    rag_mode: Literal["vector", "hybrid", "hybrid_rerank"] = "vector"
+    rag_mode: Literal["vector", "hybrid", "hybrid_rerank", "adaptive_hybrid"] = "vector"
     rag_catalog_enabled: bool = False
     rag_candidate_k: int = Field(default=30, ge=5, le=100)
     rag_rerank_model: str = "gte-rerank-v2"

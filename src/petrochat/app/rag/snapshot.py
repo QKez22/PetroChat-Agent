@@ -33,15 +33,17 @@ class SnapshotRetriever:
         self.query_cache = corpus_path.parent / f"queries-{identity}.json"
         self.queries = json.loads(self.query_cache.read_text()) if self.query_cache.exists() else {}
 
-    def invoke(self, question: str, top_k: int = 5) -> list[Document]:
+    def invoke(self, question: str, top_k: int = 5, source: str | None = None) -> list[Document]:
         key = hashlib.sha256(question.encode()).hexdigest()
         if key not in self.queries:
             self.queries[key] = self.embedder.embed_query(question)
             self.query_cache.write_text(json.dumps(self.queries), encoding="utf-8")
         vector = np.asarray(self.queries[key], dtype=np.float32)
         scores = self.vectors @ (vector / max(np.linalg.norm(vector), 1e-12))
+        if source:
+            scores = np.where([c.source_doc == source for c in self.chunks], scores, -np.inf)
         indices = np.argsort(-scores, kind="stable")[:top_k]
         return [Document(page_content=self.chunks[i].content, metadata={
             **self.chunks[i].to_metadata(), "chunk_id": self.chunks[i].chunk_id,
             "score": float(1 - scores[i]), "backend": "snapshot_exact",
-        }) for i in indices]
+        }) for i in indices if np.isfinite(scores[i])]

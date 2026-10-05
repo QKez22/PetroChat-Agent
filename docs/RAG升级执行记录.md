@@ -1,5 +1,7 @@
 # RAG 升级执行记录
 
+2026-10-05：完成第二轮原因诊断与 `adaptive_hybrid` 实现；20 道新冻结题上相对向量 Recall@5 +15 个百分点、MRR +0.1725；相对第一轮减少 70% 重排调用。中位延迟改善，但 P95 未稳定改善。范围、方法、复测结果及限制详见 `RAG第二轮优化报告.md`。
+
 分支：`codex/rag-evidence`。保留 DeepSeek、百炼 text-embedding-v3、Chroma HTTP 和现有 Supervisor。
 
 私有语料、原文片段、评测问题及运行结果只写入 ignored 的 `data/runtime/`，不提交远程。

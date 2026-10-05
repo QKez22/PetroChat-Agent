@@ -70,17 +70,25 @@ def fuse(*rankings: list[Document], k: int = 30) -> list[Document]:
     ]
 
 
-def rerank(query: str, docs: list[Document], top_k: int = 5) -> list[Document]:
+def rerank(
+    query: str, docs: list[Document], top_k: int = 5, *, contextual: bool = False
+) -> list[Document]:
     if not docs:
         return []
     s = get_settings()
+    if contextual:
+        from .adaptive import contextual_text
+
+        texts = [contextual_text(d) for d in docs]
+    else:
+        texts = [d.page_content for d in docs]
     try:
         response = httpx.post(
             s.rag_rerank_url,
             headers={"Authorization": f"Bearer {s.dashscope_api_key.get_secret_value()}"},
             json={
                 "model": s.rag_rerank_model,
-                "input": {"query": query, "documents": [d.page_content for d in docs]},
+                "input": {"query": query, "documents": texts},
                 "parameters": {"top_n": min(top_k, len(docs)), "return_documents": False},
             },
             timeout=s.rag_rerank_timeout_seconds,

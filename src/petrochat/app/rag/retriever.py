@@ -59,9 +59,37 @@ class PetrochatRetriever(BaseRetriever):
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
         mode = self.mode or get_settings().rag_mode
-        if mode not in {"vector", "hybrid", "hybrid_rerank"}:
+        if mode not in {"vector", "hybrid", "hybrid_rerank", "adaptive_hybrid"}:
             raise ValueError("unknown retrieval mode")
         candidate_k = max(self.top_k, get_settings().rag_candidate_k)
+        if mode == "adaptive_hybrid":
+            from .adaptive import adaptive_search
+
+            corpus = [
+                Document(page_content=r.content, metadata={**r.metadata, "chunk_id": r.chunk_id})
+                for r in get_chunks(where=self.where_filter, collection_name=self.collection_name)
+            ]
+
+            def scoped_vector(question, k, source):
+                where = self.where_filter
+                if source:
+                    source_filter = {"source_doc": source}
+                    where = {"$and": [where, source_filter]} if where else source_filter
+                results = _vector_query(
+                    query_text=question, top_k=k, where=where, collection_name=self.collection_name
+                )
+                return [
+                    Document(
+                        page_content=r.content,
+                        metadata={**r.metadata, "chunk_id": r.chunk_id, "score": r.score},
+                    )
+                    for r in results
+                    if self.score_threshold is None or r.score <= self.score_threshold
+                ]
+
+            return adaptive_search(
+                query, corpus, scoped_vector, top_k=self.top_k, candidate_k=candidate_k
+            )
         retrieved = _vector_query(
             query_text=query,
             top_k=self.top_k if mode == "vector" else candidate_k,
