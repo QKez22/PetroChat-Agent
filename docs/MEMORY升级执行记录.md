@@ -49,3 +49,11 @@
 
 2026-10-05 只读预检：新表不存在、应用账号无 CREATE 权限。未尝试提权或改用业务账号。
 阶段 4/5（结构化版本、语义缓存、组件实测比较）尚未执行，不把安全回归结果当作语义优化收益。
+
+## 迁移后权限复核
+
+管理员执行 005 后，应用账号 `petrochat_app@%` 对 `agent_memory_sync` 的 SELECT/UPDATE/DELETE 空操作检查通过。
+但旧应用表 `user_memory`、`memory_event` 的 SELECT/UPDATE/DELETE 均返回 MySQL 1142（权限不足）。
+因此真实记忆写入、事务 outbox、MySQL/Chroma 联调仍被阻塞；未开启新同步功能，也未操作业务数据。
+补充 `006_memory_governance_grants.sql`，只授权上述两张旧应用记忆表的 CRUD，不授予全库或业务表写权限。
+执行后继续验证实际 INSERT/事务回滚和隔离数据同步，再进入阶段 4/5。
