@@ -1,6 +1,7 @@
 <script setup>
 import MarkdownIt from "markdown-it";
 import EvidenceCards from "./components/EvidenceCards.vue";
+import ReportPanel from "./components/ReportPanel.vue";
 import {
   Activity,
   BarChart3,
@@ -1072,6 +1073,9 @@ onMounted(async () => {
           <Database :size="16" />
           记忆
         </button>
+        <button type="button" :class="{ active: activeView === 'reports' }" @click="activeView = 'reports'">
+          <BarChart3 :size="16" />报表
+        </button>
         <button
           type="button"
           :class="{ active: activeView === 'admin' }"
@@ -1284,6 +1288,7 @@ onMounted(async () => {
         </div>
       </form>
 
+      <ReportPanel v-else-if="activeView === 'reports' && currentUser" :key="localToken" :token="localToken" />
       <template v-else-if="activeView === 'memory'">
         <header class="topbar">
           <div>
