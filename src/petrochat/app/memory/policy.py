@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from typing import Literal
 
 MemoryRoute = Literal["qa", "sql", "general", "memory"]
@@ -187,9 +186,8 @@ def validate_memory_candidate(memory_type: str, content: str) -> None:
 
 def _is_duplicate(content: str, existing_contents: set[str]) -> bool:
     compact_existing = {_compact(item) for item in existing_contents}
-    if content in compact_existing:
-        return True
-    return any(SequenceMatcher(a=content, b=item).ratio() >= 0.9 for item in compact_existing)
+    # Similar sentences can change a number, scope or negation. Fail conservative.
+    return _compact(content) in compact_existing
 
 
 def _compact(text: str) -> str:

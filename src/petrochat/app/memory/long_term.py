@@ -15,12 +15,13 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Literal
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 UTC = timezone.utc  # Py3.10 兼容（3.11+ datetime.UTC 等价）
 from sqlalchemy.engine import Engine
 
 from ..sql.engine import get_app_engine as get_engine
 from .policy import validate_memory_candidate
+from .validity import UNSET, normalize_expiry
 
 MemoryStatus = Literal["active", "disabled", "deleted"]
 MemoryEventType = Literal["created", "updated", "disabled", "deleted", "accessed"]
@@ -129,7 +130,7 @@ class LongTermMemoryStore:
             metadata=metadata or {},
             created_at=now,
             updated_at=now,
-            expires_at=expires_at,
+            expires_at=normalize_expiry(expires_at),
         )
         with self._lock, self.engine.begin() as conn:
             conn.execute(
@@ -191,6 +192,35 @@ class LongTermMemoryStore:
             ).mappings().first()
         return self._row_to_item(row) if row else None
 
+    def get_memories_for_recall(
+        self, *, user_id: str, memory_types: set[str], ids: list[str] | None = None,
+        limit: int = 200,
+    ) -> list[MemoryItem]:
+        """One tenant-scoped round trip; validate lifecycle before ranking."""
+        if not memory_types or ids == []:
+            return []
+        params: dict[str, Any] = {
+            "user_id": self._user_id_value(user_id), "types": sorted(memory_types),
+            "now": _now_db(), "limit": max(1, min(limit, 1000)),
+        }
+        extra = ""
+        binds = [bindparam("types", expanding=True)]
+        if ids is not None:
+            valid_ids = list(dict.fromkeys(int(v) for v in ids if str(v).isdigit() and int(v) < 2**63))
+            if not valid_ids:
+                return []
+            params["ids"] = valid_ids[:1000]
+            binds.append(bindparam("ids", expanding=True))
+            extra = "AND id IN :ids"
+        query = text(f"""
+            SELECT * FROM user_memory
+            WHERE user_id = :user_id AND status = 'active' AND memory_type IN :types
+              AND (expires_at IS NULL OR expires_at > :now) {extra}
+            ORDER BY updated_at DESC, id DESC LIMIT :limit
+        """).bindparams(*binds)
+        with self.engine.connect() as conn:
+            return [self._row_to_item(row) for row in conn.execute(query, params).mappings()]
+
     def list_memories(
         self,
         *,
@@ -244,6 +274,7 @@ class LongTermMemoryStore:
         confidence: float | None = None,
         actor_id: str | None = None,
         reason: str = "update memory",
+        expires_at: Any = UNSET,
     ) -> MemoryItem | None:
         current = self.get_memory(memory_id)
         if current is None:
@@ -256,6 +287,7 @@ class LongTermMemoryStore:
             raise ValueError("confidence must be between 0 and 1")
         validate_memory_candidate(current.memory_type, next_content)
         next_metadata = current.metadata if metadata is None else metadata
+        next_expiry = current.expires_at if expires_at is UNSET else normalize_expiry(expires_at)
         now = _now_db()
         with self._lock, self.engine.begin() as conn:
             conn.execute(
@@ -265,7 +297,7 @@ class LongTermMemoryStore:
                     SET content = :content,
                         metadata_json = :metadata_json,
                         confidence = :confidence,
-                        updated_at = :updated_at
+                        updated_at = :updated_at, expires_at = :expires_at
                     WHERE id = :id
                     """
                 ),
@@ -274,6 +306,7 @@ class LongTermMemoryStore:
                     "metadata_json": _json_dumps(next_metadata),
                     "confidence": next_confidence,
                     "updated_at": now,
+                    "expires_at": next_expiry,
                     "id": self._id_value(memory_id),
                 },
             )
@@ -334,11 +367,12 @@ class LongTermMemoryStore:
                            metadata_json, created_at, updated_at, expires_at
                     FROM user_memory
                     WHERE status = 'active'
+                      AND (expires_at IS NULL OR expires_at > :now)
                     ORDER BY updated_at DESC, id DESC
                     LIMIT :limit
                     """
                 ),
-                {"limit": max(1, min(limit, 100_000))},
+                {"limit": max(1, min(limit, 100_000)), "now": _now_db()},
             ).mappings().all()
         return [self._row_to_item(row) for row in rows]
 

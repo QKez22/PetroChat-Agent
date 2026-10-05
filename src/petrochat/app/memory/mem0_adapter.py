@@ -15,6 +15,7 @@ from loguru import logger
 
 from ..core import get_settings
 from .long_term import MemoryItem
+from .validity import is_effective
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ class Mem0MemoryAdapter:
         return self._parse_candidates(response)
 
     def sync_created(self, item: MemoryItem) -> None:
-        if not self.enabled or item.status != "active":
+        if not self.enabled or not is_effective(item):
             return
         try:
             self.active_client.add(
@@ -96,7 +97,7 @@ class Mem0MemoryAdapter:
     def sync_updated(self, item: MemoryItem) -> None:
         if not self.enabled:
             return
-        if item.status != "active":
+        if not is_effective(item):
             self.sync_removed(item)
             return
         try:
@@ -180,6 +181,7 @@ class Mem0MemoryAdapter:
             "status": item.status,
             "created_at": item.created_at,
             "updated_at": item.updated_at,
+            "expires_at": item.expires_at or "",
         }
         for key, value in item.metadata.items():
             if isinstance(value, str | int | float | bool):
