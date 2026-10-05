@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_langsmith()
     memory_worker = None
+    report_worker = None
     if settings.memory_sync_enabled:
         if not settings.mem0_enabled:
             raise RuntimeError("MEMORY_SYNC_ENABLED requires MEM0_ENABLED")
@@ -37,8 +38,18 @@ async def lifespan(app: FastAPI):
                 settings.app_env, settings.mcp_enabled,
                 settings.chroma_url, settings.deepseek_chat_model)
     try:
+        if settings.report_enabled:
+            from petrochat.app.report.store import ReportStore
+            from petrochat.app.report.worker import ReportWorker, ReportWorkerService
+            from petrochat.app.sql.engine import get_app_engine
+
+            report_worker = ReportWorkerService(
+                ReportWorker(ReportStore(get_app_engine()), settings.report_artifact_dir)
+            ).start()
         yield
     finally:
+        if report_worker:
+            report_worker.stop()
         if memory_worker:
             memory_worker.stop()
         logger.info("App shutting down")

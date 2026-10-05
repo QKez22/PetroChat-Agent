@@ -64,3 +64,10 @@
 - 每个节点同步持久化后返回调度层；快照/草稿/导出放在持久卷，checkpoint 只保存引用。产物 SHA256 校验、原子发布、清单写入租约 fencing；CSV 防公式注入。
 - 修改需求新建 generation，必须再次审批，不复用旧快照。批准绑定 interrupt ID，避免过时确认落到另一道门禁。
 - 三项工作流测试通过：双门禁/暂停恢复/导出、修改口径、快照落盘后崩溃恢复不重复查询。此时尚未接 API 和前端。
+
+## 阶段 4–5：授权 API 与托管 worker（2026-10-06）
+
+- `/api/reports`：创建/列表/详情/actions/events/artifacts。身份仅取 JWT；跨用户返回 404，重复/过时操作 409，禁用时 503。产物下载校验哈希，未完成不暴露 ZIP。
+- FastAPI 生命周期启动独立线程，串行执行，每节点重新领取租约；多 worker 依赖 MySQL 8 行锁/skip locked 和写入 fencing。无 Redis/Celery。
+- `REPORT_ENABLED` 默认 false，迁移后开启；所有实例必须共享持久产物目录。Docker 复用挂载 `/app/data`。
+- 故障测试覆盖取消执行中任务、审批 checkpoint 落盘后进程退出（不能误批准草稿）、产物损坏、worker 启停。关闭浏览器不取消任务。

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
     log_level: str = Field(default="INFO")
+    report_enabled: bool = False
+    report_artifact_dir: Path = Field(default=PROJECT_ROOT / "data" / "runtime" / "reports")
     agent_model_call_limit: int = Field(default=12, ge=1, le=100)
     agent_tool_call_limit: int = Field(default=8, ge=1, le=100)
     agent_tool_repeat_limit: int = Field(default=2, ge=1, le=10)

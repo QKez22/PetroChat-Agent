@@ -111,3 +111,60 @@ def test_crash_after_query_artifact_commit_does_not_requery(setup, monkeypatch):
         conn.execute(update(tasks).where(tasks.c.id == task["id"]).values(due_at=0))
     advance(worker, store, task["id"], "awaiting_input")
     assert len(calls) == 1
+
+
+def test_crash_after_approval_checkpoint_does_not_approve_draft(setup, monkeypatch):
+    store, root, query, calls = setup
+    task = store.create("1", "统计事务总数")
+    worker = ReportWorker(store, root, query)
+    plan = advance(worker, store, task["id"], "awaiting_input")
+    store.action(task["id"], "1", plan["revision"], "approve")
+    original = store.finish_step
+
+    def crash(*args, **kwargs):
+        raise KeyboardInterrupt("process died before task bookkeeping")
+
+    monkeypatch.setattr(store, "finish_step", crash)
+    with pytest.raises(KeyboardInterrupt):
+        worker.run_once()
+    monkeypatch.setattr(store, "finish_step", original)
+    with store.engine.begin() as conn:
+        conn.execute(update(tasks).where(tasks.c.id == task["id"]).values(lease_until=0))
+    draft = advance(ReportWorker(store, root, query), store, task["id"], "awaiting_input")
+    assert draft["state_json"]["review"]["stage"] == "draft"
+    assert not draft["state_json"]["artifacts"].get("export")
+    assert len(calls) == 1
+
+
+def test_cancel_during_query_fences_artifacts_and_checkpoint(setup):
+    store, root, query, calls = setup
+    task = store.create("1", "统计事务总数")
+
+    def cancelling_query(question):
+        row = store.get(task["id"], "1")
+        store.action(task["id"], "1", row["revision"], "cancel")
+        return query(question)
+
+    worker = ReportWorker(store, root, cancelling_query)
+    plan = advance(worker, store, task["id"], "awaiting_input")
+    store.action(task["id"], "1", plan["revision"], "approve")
+    worker.run_once()
+    worker.run_once()
+    row = store.get(task["id"], "1")
+    assert row["status"] == "cancelled"
+    assert ArtifactStore(store, root, row, "").find("snapshot") is None
+    assert not worker.run_once()
+
+
+def test_artifact_corruption_is_detected(setup):
+    store, root, query, calls = setup
+    task = store.create("1", "统计事务总数")
+    worker = ReportWorker(store, root, query)
+    plan = advance(worker, store, task["id"], "awaiting_input")
+    store.action(task["id"], "1", plan["revision"], "approve")
+    draft = advance(worker, store, task["id"], "awaiting_input")
+    files = ArtifactStore(store, root, draft, "")
+    manifest = files.find("draft")
+    (root / manifest["storage_key"]).write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="integrity"):
+        files.read(manifest["id"])
