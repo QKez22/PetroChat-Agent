@@ -1,0 +1,30 @@
+{
+  "memories": [
+    {"id":"1","content":"用户偏好简洁回答，先给结论，再用少量要点解释。"},
+    {"id":"2","content":"用户偏好使用中文交流，英文术语需附中文解释。"},
+    {"id":"3","content":"用户默认只关注运行中的任务，不包括已完成任务。"},
+    {"id":"4","content":"用户负责炼油一部的仪表专业设备维护工作。"},
+    {"id":"5","content":"用户希望导出的报表采用Excel格式。"},
+    {"id":"6","content":"用户习惯按周汇总任务进展，以周一为一周开始。"},
+    {"id":"7","content":"用户需要设备压力统一用MPa表示。"},
+    {"id":"8","content":"用户希望展示数据时优先用柱状图。"}
+  ],
+  "cases":[
+    {"split":"dev","query":"我喜欢什么长度的回答？","expected":"1"},
+    {"split":"dev","query":"我希望用哪种语言交流？","expected":"2"},
+    {"split":"dev","query":"默认筛选什么状态的任务？","expected":"3"},
+    {"split":"dev","query":"我是哪个部门什么专业的？","expected":"4"},
+    {"split":"dev","query":"我喜欢哪种报表文件格式？","expected":"5"},
+    {"split":"dev","query":"我一般按什么时间周期汇总进展？","expected":"6"},
+    {"split":"dev","query":"太阳距离地球多远？","expected":null},
+    {"split":"dev","query":"如何制作蛋糕？","expected":null},
+    {"split":"test","query":"回复应该言简意赅还是长篇大论？","expected":"1"},
+    {"split":"test","query":"跟我对话用汉语还是英语？","expected":"2"},
+    {"split":"test","query":"帮我统计时是否排除已经办结的事项？","expected":"3"},
+    {"split":"test","query":"我的岗位负责哪部分装置的维护？","expected":"4"},
+    {"split":"test","query":"结果要保存成什么类型的表格文件？","expected":"5"},
+    {"split":"test","query":"设备压强数值显示成什么单位合适？","expected":"7"},
+    {"split":"test","query":"珠穆朗玛峰有多高？","expected":null},
+    {"split":"test","query":"给我介绍一下唐朝诗人李白。","expected":null}
+  ]
+}
