@@ -256,6 +256,10 @@ def _recall_from_mem0(
         item = prefetched.get(result.memory_id)
         if item is None:
             continue
+        from ..core import get_settings
+        from .sync import fingerprint
+        if get_settings().memory_sync_enabled and result.metadata.get("petrochat_fingerprint") != fingerprint(item):
+            continue  # stale embedding must not select newly edited, unrelated content
         memories.append(
             RecalledMemory.from_item(
                 item,

@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+import hashlib
+import uuid
 
 from loguru import logger
 
@@ -124,6 +126,61 @@ class Mem0MemoryAdapter:
         if not self.enabled:
             return
         self.active_client.reset()
+
+    def _index_rows(self, user_id: str, memory_id: str) -> dict:
+        return self.active_client.vector_store.collection.get(where={"$and": [
+            {"user_id": user_id}, {"petrochat_memory_id": memory_id},
+        ]}, include=["metadatas"])
+
+    def indexed_state(self, user_id: str, memory_id: str) -> list[str]:
+        return [m.get("petrochat_fingerprint", "") for m in self._index_rows(user_id, memory_id)["metadatas"]]
+
+    def remove_index_key(self, user_id: str, memory_id: str) -> None:
+        rows = self._index_rows(user_id, memory_id)
+        if rows["ids"]:
+            self.active_client.vector_store.collection.delete(ids=rows["ids"])
+
+    def iter_index_keys(self, page_size: int = 200):
+        collection = self.active_client.vector_store.collection
+        offset, keys = 0, set()
+        while True:
+            rows = collection.get(limit=page_size, offset=offset, include=["metadatas"])
+            if not rows["ids"]:
+                break
+            for meta in rows["metadatas"]:
+                user, memory = str(meta.get("user_id", "")), str(meta.get("petrochat_memory_id", ""))
+                if user.isdigit() and memory.isdigit():
+                    keys.add((user, memory))
+            offset += len(rows["ids"])
+        yield from sorted(keys)
+
+    def sync_current(self, item: MemoryItem | None, *, memory_id: str, user_id: str) -> None:
+        """Deterministic IDs and direct upsert for the governed derived projection.
+
+        Mem0 still handles candidate extraction/search. Projection writes deliberately
+        avoid Mem0 inference and history: MySQL is the authoritative audit log.
+        """
+        if not self.enabled:
+            raise RuntimeError("Mem0 disabled")
+        if item is None or item.user_id != user_id or not is_effective(item):
+            self.remove_index_key(user_id, memory_id)
+            return
+        from ..core.llm import get_embedding
+        from .sync import fingerprint
+        stable_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"petrochat-memory/{user_id}/{memory_id}"))
+        rows = self._index_rows(user_id, memory_id)
+        digest = fingerprint(item)
+        if rows["ids"] == [stable_id] and rows["metadatas"][0].get("petrochat_fingerprint") == digest:
+            return
+        payload = {**self._metadata(item), "user_id": user_id, "data": item.content,
+            "hash": hashlib.md5(item.content.encode()).hexdigest(), "petrochat_fingerprint": digest,
+            "petrochat_memory_id": memory_id, "stage": "active", "status": "active"}
+        vector = get_embedding().embed_documents([item.content])[0]
+        collection = self.active_client.vector_store.collection
+        collection.upsert(ids=[stable_id], embeddings=[vector], metadatas=[payload])
+        stale = [key for key in rows["ids"] if key != stable_id]
+        if stale:
+            collection.delete(ids=stale)
 
     def reset_candidate_index(self) -> None:
         if not self.enabled:

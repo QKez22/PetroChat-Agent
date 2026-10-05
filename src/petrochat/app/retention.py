@@ -298,6 +298,10 @@ class RetentionCleanupService:
             result.skipped.append("memory_event missing")
             return
         for row in rows:
+            from .core import get_settings
+            if get_settings().memory_sync_enabled:
+                from .memory.sync import enqueue
+                enqueue(conn, str(row["id"]), str(row["user_id"]))
             conn.execute(
                 text(
                     """

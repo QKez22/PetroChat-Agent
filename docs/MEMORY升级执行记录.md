@@ -26,3 +26,26 @@
 - fallback 合并不再直接比较不同来源的分数。
 - 31 项记忆/保留策略/API 测试通过。固定 8 对中正确 6 对、危险误合并 0、同义漏合并 2。
 - 数据库批量校验测试确认一次 SELECT；未测线上延迟百分比。
+
+## 阶段 3：同步可靠性（代码就绪，真实部署待迁移）
+
+- `MEMORY_SYNC_ENABLED=false` 默认保持兼容。打开后记忆变更与 outbox 同事务提交，缺表会回滚业务写入，不静默丢任务。
+- 同记忆任务合并，持久退避重试（上限 300 秒）、120 秒租约、最新状态读取、更新代次检查。
+- MySQL 全量 keyset 分页对账；仅清理具有明确用户/业务记忆 ID 的派生索引。
+- 确定性索引 ID + upsert；内容指纹阻止主召回使用旧索引选择新正文。
+- Mem0 仍用于抽取和搜索；派生索引直接写其 Chroma collection，避免无意义的推理和重复 history 记录。
+- 旧重建脚本不再清空索引，也不再把吞掉的异常计作成功。
+- 注意：这是至少一次同步与最终一致，不是跨库事务。超出租约的旧 worker 可能产生短暂旧向量，读门禁拒绝，下一次对账修复。
+- 单元测试覆盖失败重试、退避、进程租约恢复、事务回滚、处理中更新、分页、孤儿与重复记录修复、upsert 幂等。
+- 本阶段连同记忆、API、retention、Agent runtime、上下文治理共 63 项测试通过；MySQL/Chroma 真实联调尚未通过，等待管理员迁移。
+
+部署顺序：
+
+1. 管理员执行 `scripts/migrations/005_memory_sync.sql`（本机 timing_task / petrochat_app@%）。
+2. 应用账号验证 SELECT/INSERT/UPDATE/DELETE，然后进行真实 MySQL + 独立测试 Chroma collection 验收。
+3. 验证后才开启 `MEMORY_SYNC_ENABLED=true`，同时保持 `MEM0_ENABLED=true`。
+4. 启动受进程管理器托管的 `uv run python scripts/sync_memory_index.py --watch`；每 5 秒消费、每 300 秒对账，故障记录错误类型，监控 pending 最老时间、attempts 和失败计数。
+5. 回滚开关前先停止 worker；不要删除 MySQL 真相源，也不要清空索引。
+
+2026-10-05 只读预检：新表不存在、应用账号无 CREATE 权限。未尝试提权或改用业务账号。
+阶段 4/5（结构化版本、语义缓存、组件实测比较）尚未执行，不把安全回归结果当作语义优化收益。

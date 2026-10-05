@@ -448,6 +448,10 @@ class LongTermMemoryStore:
                 "created_at": _now_db(),
             },
         )
+        from ..core import get_settings
+        if get_settings().memory_sync_enabled:
+            from .sync import enqueue
+            enqueue(conn, memory_id, user_id)
 
     def _row_to_item(self, row: Any) -> MemoryItem:
         return MemoryItem(
@@ -499,16 +503,25 @@ class LongTermMemoryStore:
         return str(value)
 
     def _sync_mem0_created(self, item: MemoryItem) -> None:
+        from ..core import get_settings
+        if get_settings().memory_sync_enabled:
+            return
         from .mem0_adapter import get_mem0_memory_adapter
 
         get_mem0_memory_adapter().sync_created(item)
 
     def _sync_mem0_updated(self, item: MemoryItem) -> None:
+        from ..core import get_settings
+        if get_settings().memory_sync_enabled:
+            return
         from .mem0_adapter import get_mem0_memory_adapter
 
         get_mem0_memory_adapter().sync_updated(item)
 
     def _sync_mem0_removed(self, item: MemoryItem) -> None:
+        from ..core import get_settings
+        if get_settings().memory_sync_enabled:
+            return
         from .mem0_adapter import get_mem0_memory_adapter
 
         get_mem0_memory_adapter().sync_removed(item)
