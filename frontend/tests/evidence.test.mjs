@@ -5,7 +5,7 @@ import { createSSRApp } from "vue";
 import { renderToString } from "vue/server-renderer";
 
 test("evidence cards render safe text, version warning and accessible preview", async () => {
-  const server = await createServer({ server: { middlewareMode: true } });
+  const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, optimizeDeps: { noDiscovery: true, include: [] } });
   try {
     const { default: Cards } = await server.ssrLoadModule("/src/components/EvidenceCards.vue");
     const html = await renderToString(createSSRApp(Cards, { evidence: [{

@@ -6,7 +6,7 @@ import { createSSRApp } from "vue";
 import { renderToString } from "vue/server-renderer";
 
 test("report panel renders accessible request form and safe-boundary guidance", async () => {
-  const server = await createServer({ server: { middlewareMode: true, hmr: false } });
+  const server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false }, optimizeDeps: { noDiscovery: true, include: [] } });
   try {
     const { default: Panel } = await server.ssrLoadModule("/src/components/ReportPanel.vue");
     const html = await renderToString(createSSRApp(Panel, { token: "test" }));

@@ -86,6 +86,9 @@
 - 证据保存在本地忽略目录 `data/runtime/report-acceptance/46a6c245a0d74adbb27fc9974da610da/acceptance.json`；仅本次 UUID 数据库记录被清理，用户原有任务未领取/修改。
 - 全量 pytest：295 passed、10 skipped（Chroma 不可达的既有检索/向量库集成测试）。报表测试全部通过，不能把跳过项称为已验证。
 - 首轮出现 16 项既有记忆测试失败：测试加载 `.env` 的同步开关但 SQLite fixture 无 outbox 表；现为测试默认关闭外部后台开关，专门测试显式开启。部署配置不受影响。
+- 启动真实 Uvicorn 后，健康检查 200、无令牌报表列表 401、授权列表 200。临时验证服务已停止；本地 `.env` 已开启 REPORT_ENABLED，正常重启生效。
+- 浏览器自动化工具打开 localhost 返回 `net::ERR_BLOCKED_BY_CLIENT`，未完成真实浏览器点击/视觉验收；不绕过限制。已有 SSR/传输层/接口测试与生产构建，不把它们冒充浏览器 E2E。
+- 前端 SSR 测试禁止启动 WebSocket 与依赖预扫描，避免与开发服务/其他测试争用端口。
 
 ## 启动与使用
 

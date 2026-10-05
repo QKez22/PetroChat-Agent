@@ -10,11 +10,12 @@ from .workflow import ArtifactStore, build_report_graph, business_query
 
 
 class ReportWorker:
-    def __init__(self, store: ReportStore, root, query=business_query):
+    def __init__(self, store: ReportStore, root, query=business_query, *, task_id=None):
         self.store, self.root, self.query = store, root, query
+        self.task_id = task_id
 
     def run_once(self):
-        task = self.store.claim()
+        task = self.store.claim(task_id=self.task_id)
         if task is None:
             return False
         task_id, token = task["id"], task["lease_token"]

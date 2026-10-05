@@ -202,7 +202,7 @@ class ReportStore:
                 raise Conflict("action is not allowed in current status")
             return self._update(conn, row, action, status=target, state_json=state, **changes)
 
-    def claim(self, lease_seconds=300):
+    def claim(self, lease_seconds=300, *, task_id=None):
         now = time()
         with self.engine.begin() as conn:
             query = (
@@ -216,6 +216,8 @@ class ReportStore:
                 .order_by(tasks.c.created_at)
                 .limit(1)
             )
+            if task_id is not None:
+                query = query.where(tasks.c.id == task_id)
             row = conn.execute(query.with_for_update(skip_locked=True)).mappings().first()
             if row is None:
                 return None

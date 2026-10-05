@@ -25,6 +25,14 @@ def test_owner_revision_and_audit(store):
     assert len(store.history(row["id"], "1")) == 3
 
 
+def test_scoped_claim_never_picks_another_task(store):
+    real = store.create("1", "existing user task")
+    smoke = store.create("0", "isolated smoke task")
+    assert store.claim(task_id="absent") is None
+    assert store.claim(task_id=smoke["id"])["id"] == smoke["id"]
+    assert store.get(real["id"], "1")["status"] == "queued"
+
+
 def test_expired_worker_cannot_write_or_complete(store):
     from langgraph.checkpoint.base import empty_checkpoint
 
