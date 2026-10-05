@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Any
 import hashlib
 import uuid
+import time
 
 from loguru import logger
 
@@ -47,6 +48,7 @@ class Mem0MemoryAdapter:
     ) -> None:
         self._active_client = memory_client
         self._candidate_client = candidate_client
+        self._candidate_injected = candidate_client is not None
         self._enabled_override = enabled
 
     @property
@@ -66,22 +68,58 @@ class Mem0MemoryAdapter:
 
         if not self.enabled or not messages:
             return []
+        run_id = "pc-candidate-" + uuid.uuid4().hex
         candidate_metadata = {
+            **(metadata or {}),
             "stage": "candidate",
             "user_id": user_id,
-            **(metadata or {}),
+            "candidate_expires_at": time.time() + 3600,
         }
+        client = None
         try:
-            response = self.candidate_client.add(
+            # Fresh isolated extraction scope; rejected/deleted candidates cannot bias
+            # subsequent extraction. Production candidate history is in-memory only.
+            client = self._candidate_client if self._candidate_injected else _build_mem0_client(
+                get_settings().mem0_candidate_chroma_collection, history_path=":memory:")
+            response = client.add(
                 messages,
                 user_id=user_id,
+                run_id=run_id,
                 metadata=candidate_metadata,
                 infer=True,
             )
+            return self._parse_candidates(response)
         except Exception as exc:
-            logger.warning("Mem0 candidate extraction failed: {}", exc)
+            logger.warning("Mem0 candidate extraction failed: {}", type(exc).__name__)
             return []
-        return self._parse_candidates(response)
+        finally:
+            if client is not None and hasattr(client, "vector_store"):
+                try:
+                    client.vector_store.collection.delete(where={"run_id": run_id})
+                except Exception as exc:
+                    logger.warning("Candidate cleanup deferred to expiry repair: {}", type(exc).__name__)
+            if client is not None and not self._candidate_injected:
+                try:
+                    client.db.close()
+                except Exception as exc:
+                    logger.warning("Candidate history close failed: {}", type(exc).__name__)
+
+    def cleanup_candidates(self) -> int:
+        """Only new managed extraction runs with explicit expired TTL are removed."""
+        client = self.candidate_client
+        collection = client.vector_store.collection
+        offset, expired = 0, []
+        while True:
+            rows = collection.get(where={"candidate_expires_at": {"$lt": time.time()}},
+                limit=200, offset=offset, include=["metadatas"])
+            if not rows["ids"]:
+                break
+            expired.extend(key for key, meta in zip(rows["ids"], rows["metadatas"])
+                if meta.get("stage") == "candidate" and str(meta.get("run_id", "")).startswith("pc-candidate-"))
+            offset += len(rows["ids"])
+        for start in range(0, len(expired), 200):
+            collection.delete(ids=expired[start:start+200])
+        return len(expired)
 
     def sync_created(self, item: MemoryItem) -> None:
         if not self.enabled or not is_effective(item):
@@ -199,6 +237,8 @@ class Mem0MemoryAdapter:
             )
         except Exception as exc:
             logger.warning("Mem0 active recall failed: {}", exc)
+            from .semantic import get_semantic_cache
+            get_semantic_cache().unavailable()
             return []
         return self._parse_results(response)
 
@@ -211,7 +251,7 @@ class Mem0MemoryAdapter:
     @property
     def candidate_client(self) -> Any:
         if self._candidate_client is None:
-            self._candidate_client = _build_mem0_client(get_settings().mem0_candidate_chroma_collection)
+            self._candidate_client = _build_mem0_client(get_settings().mem0_candidate_chroma_collection, history_path=":memory:")
         return self._candidate_client
 
     def _find_mem0_ids(self, user_id: str, memory_id: str) -> list[str]:
@@ -296,7 +336,7 @@ def _metadata(row: dict[str, Any]) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
-def _build_mem0_client(collection_name: str) -> Any:
+def _build_mem0_client(collection_name: str, *, history_path: str | None = None) -> Any:
     try:
         from mem0 import Memory
     except ImportError as exc:
@@ -332,7 +372,7 @@ def _build_mem0_client(collection_name: str) -> Any:
                 "embedding_dims": settings.embedding_dim,
             },
         },
-        "history_db_path": str(settings.mem0_history_db_path),
+        "history_db_path": history_path or str(settings.mem0_history_db_path),
         "custom_instructions": (
             "Only remember durable user preferences, default filters, project preferences, "
             "historical decisions, corrections, and stable business context. Do not remember "

@@ -46,7 +46,9 @@ def explicit_preference(question: str) -> Preference | None:
     number = re.fullmatch(r"(?:以后|今后)?默认(?:查询|查)?(?:吨位为)?([0-9]+(?:\.[0-9]+)?)(万)?吨(?:的任务)?", value)
     if number:
         amount = Decimal(number[1]) * (10000 if number[2] else 1)
-        return Preference(key="query.default_tonnage", value=str(amount), unit="吨")
+        if amount > 0 and amount <= 10**12:
+            return Preference(key="query.default_tonnage", value=str(amount), unit="吨")
+        return None
     if re.fullmatch(r"(?:请记住[，,：:]?)?(?:以后|今后)?(?:回答|回复)(?:请)?(?:简洁|简短)(?:一点)?", value):
         return Preference(key="answer.verbosity", value="concise")
     if re.fullmatch(r"(?:请记住[，,：:]?)?(?:以后|今后)?(?:回答|回复)(?:请)?详细(?:一点)?", value):

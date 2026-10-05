@@ -22,8 +22,15 @@ def main():
     while True:
         try:
             if time.monotonic() >= next_reconcile:
-                print(json.dumps({"reconcile": worker.reconcile(dry_run=args.dry_run)}), flush=True)
                 next_reconcile = time.monotonic() + 300
+                try:
+                    print(json.dumps({"reconcile": worker.reconcile(dry_run=args.dry_run)}), flush=True)
+                    if not args.dry_run:
+                        print(json.dumps({"expired_candidates_removed": worker.adapter.cleanup_candidates()}), flush=True)
+                except Exception as exc:
+                    print(json.dumps({"maintenance_error": type(exc).__name__}), flush=True)
+                    if not args.watch:
+                        raise
             if args.dry_run:
                 return
             result = worker.run_once()

@@ -17,6 +17,12 @@ async def lifespan(app: FastAPI):
     """应用启动/关闭钩子。"""
     settings = get_settings()
     setup_langsmith()
+    memory_worker = None
+    if settings.memory_sync_enabled:
+        if not settings.mem0_enabled:
+            raise RuntimeError("MEMORY_SYNC_ENABLED requires MEM0_ENABLED")
+        from petrochat.app.memory.worker_service import MemoryWorkerService
+        memory_worker = MemoryWorkerService().start()
 
     # 启用 MCP 时, 启动期一次性连接 MCP Server 并拉取工具列表。
     # MCP 是工具暴露方式，不应成为普通问答的单点故障；失败时运行期会降级到本地工具。
@@ -30,8 +36,12 @@ async def lifespan(app: FastAPI):
     logger.info("App ready: env={} mcp_enabled={} chroma={} chat_model={}",
                 settings.app_env, settings.mcp_enabled,
                 settings.chroma_url, settings.deepseek_chat_model)
-    yield
-    logger.info("App shutting down")
+    try:
+        yield
+    finally:
+        if memory_worker:
+            memory_worker.stop()
+        logger.info("App shutting down")
 
 
 def create_app() -> FastAPI:

@@ -24,6 +24,8 @@ def main():
     run = uuid.uuid4().hex
     user_id = str(int(run[:14], 16))
     name = "memory_smoke_" + run
+    candidate_name = name + "_candidate"
+    settings.mem0_candidate_chroma_collection = candidate_name
     store = LongTermMemoryStore()
     owned = []
     client = get_client()
@@ -64,8 +66,12 @@ def main():
             except PreferenceConflict:
                 pass
             assert worker.run_once(user_id=user_id)["succeeded"] == 1
+            candidates = adapter.extract_candidates(messages=[{"role":"user","content":"请记住我的长期偏好：以后导出报表时默认使用Excel格式。"}], user_id=user_id)
+            assert candidates, "live candidate extraction failed"
+            assert client.get_collection(candidate_name).count() == 0
             print(json.dumps({"mysql_crud": True, "chroma_search": True,
-                "idempotent": True, "update": True, "repair": True, "delete": True, "revisions": True}))
+                "idempotent": True, "update": True, "repair": True, "delete": True, "revisions": True,
+                "candidate_extraction_and_cleanup": True}))
         finally:
             # Verify exact ownership before physical removal. Never touch real tenants.
             with store.engine.begin() as conn:
@@ -80,6 +86,8 @@ def main():
                 adapter.active_client.db.close()
             if name in [str(c) if isinstance(c, str) else c.name for c in client.list_collections()]:
                 client.delete_collection(name)
+            if candidate_name in [str(c) if isinstance(c, str) else c.name for c in client.list_collections()]:
+                client.delete_collection(candidate_name)
             print("Owned smoke fixtures cleaned.")
 
 

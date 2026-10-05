@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     long_term_memory_limit: int = Field(default=5)
     mem0_enabled: bool = Field(default=False)
     memory_sync_enabled: bool = Field(default=False)
+    memory_semantic_fallback: bool = Field(default=False)
+    memory_semantic_threshold: float = Field(default=0.5, ge=0, le=1)
     mem0_chroma_collection: str = Field(default="petrochat_memories")
     mem0_candidate_chroma_collection: str = Field(default="petrochat_memory_candidates")
     mem0_history_db_path: Path = Field(default=PROJECT_ROOT / "data" / "mem0_history.db")

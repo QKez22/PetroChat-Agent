@@ -178,14 +178,14 @@ def write_memory_candidates(
 ) -> list[MemoryWriteResult]:
     """Extract with Mem0 candidate collection, filter, persist to MySQL, then sync active index."""
 
-    if not _is_numeric_user(user_id) or not should_extract_memory(question, answer=answer, route=route):
+    from .preferences import explicit_preference
+    preference = explicit_preference(question)
+    if not _is_numeric_user(user_id) or (preference is None and not should_extract_memory(question, route=route)):
         return []
 
     store = store or get_long_term_memory_store()
     try:
-        from .preferences import explicit_preference
         from .versions import preference_id, put_preference
-        preference = explicit_preference(question)
         if preference is not None:
             current = store.get_memory(preference_id(user_id, preference))
             revision = int(current.metadata.get("revision", 0)) if current else 0
@@ -320,10 +320,18 @@ def _merge_mysql_fallback(
         logger.warning("MySQL memory fallback failed: {}", exc)
         return memories
 
-    for item in _rank_memories(items, question):
+    from ..core import get_settings
+    from .semantic import get_semantic_cache, lexical_score
+    if get_settings().memory_semantic_fallback:
+        ranked, source = get_semantic_cache().rank(user_id, question, items)
+    else:
+        ranked = sorted([(item, lexical_score(item.content, question)) for item in items], key=lambda p: p[1], reverse=True)
+        ranked = [(item, score) for item, score in ranked if score > 0]
+        source = "lexical"
+    for item, score in ranked:
         if item.id in existing_ids:
             continue
-        memories.append(RecalledMemory.from_item(item, recall_source="mysql", score=_memory_score(item, question)))
+        memories.append(RecalledMemory.from_item(item, recall_source="mysql", score=score, metadata={"ranking":source}))
         existing_ids.add(item.id)
         if len(memories) >= limit:
             break
