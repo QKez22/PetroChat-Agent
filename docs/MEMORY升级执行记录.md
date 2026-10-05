@@ -86,3 +86,10 @@
 - 真实隔离租户测试通过 MySQL CRUD、Chroma search、幂等/更新/删除/修复、revision 冲突及候选抽取与清理；仅清除本轮自建测试数据。
 - 接手全量测试 283 项通过；之后增加缓存过期测试，相关 7 项通过。仅有既有 jieba 警告。
 - 语义 fallback 默认关闭，适合按场景验证后启用。仍保留 active collection，未贸然替换为纯内存方案。
+
+## 现有环境启用与安全边界
+
+本地 `.env` 已开启 MEMORY_SYNC_ENABLED / MEMORY_SEMANTIC_FALLBACK，阈值 0.5；公共默认仍关闭。重启 API 后 worker 自动运行，无需同时再启动独立 --watch。
+复核全量测试 284 项通过。已有 Chroma 索引发现 60 个在当前 MySQL 中无对应记录的标识，未删除。
+自动对账默认只报告孤儿项，读取继续以 MySQL 校验拒绝；人工核对数据库/来源后，才能通过显式 --prune-orphans 清理。该保护额外 8 项同步/lifecycle 回归通过。
+新的同步与 TTL 只管理明确归属的记忆/候选；未执行全库清理。

@@ -87,6 +87,8 @@ def test_reconcile_pages_all_rows_and_repairs_missing_duplicate_orphans(setup):
     assert plan == {"scanned": 5, "repair": 2, "orphan": 1}
     assert ("1", "999") in index.rows
     worker.reconcile(page_size=2)
+    assert ("1", "999") in index.rows  # scheduled repair never destroys unknown legacy orphans
+    worker.reconcile(page_size=2, prune_orphans=True)
     worker.run_once()
     assert worker.reconcile(page_size=2) == {"scanned": 5, "repair": 0, "orphan": 0}
 

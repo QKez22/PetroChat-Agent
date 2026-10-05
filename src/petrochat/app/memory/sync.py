@@ -90,7 +90,8 @@ class MemorySyncWorker:
             counts["failed" if error else "superseded" if newer else "succeeded"] += 1
         return counts
 
-    def reconcile(self, page_size: int = 200, *, dry_run: bool = False, user_id: str | None = None) -> dict[str, int]:
+    def reconcile(self, page_size: int = 200, *, dry_run: bool = False, user_id: str | None = None,
+                  prune_orphans: bool = False) -> dict[str, int]:
         """Keyset scan of ALL MySQL rows; never infer absence from a LIMIT slice."""
         counts = {"scanned": 0, "repair": 0, "orphan": 0}
         after = 0
@@ -119,7 +120,7 @@ class MemorySyncWorker:
             item = self.store.get_memory(memory_id)
             if item is None or item.user_id != index_user_id:
                 counts["orphan"] += 1
-                if not dry_run:
+                if not dry_run and prune_orphans:
                     # Mismatched tenant metadata is removed by repairing that index key,
                     # never by writing the other user's MySQL row.
                     self.adapter.remove_index_key(index_user_id, memory_id)
